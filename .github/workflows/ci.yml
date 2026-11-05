@@ -79,3 +79,14 @@ jobs:
             }
           "
           echo "资产检查通过"
+
+      - name: Tailwind 预编译 CSS 与源码一致
+        run: |
+          set -euo pipefail
+          # 改了 HTML/JS 里的 class 后必须重新编译并提交 css/tailwind.css，否则手机首屏会缺样式
+          npx --yes tailwindcss@3.4.16 -c tailwind.config.js -i tailwind.input.css -o /tmp/tailwind.css --minify
+          if ! diff -u css/tailwind.css /tmp/tailwind.css; then
+            echo "::error::css/tailwind.css 与源码不同步（改了 class 忘了重新编译）"
+            exit 1
+          fi
+          echo "Tailwind 预编译 CSS 与源码一致"
