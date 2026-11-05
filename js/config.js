@@ -14,6 +14,9 @@ const PASSWORD_CONFIG = {
 // API站点配置
 // 注意：ruyi/xiaomaomi/heimuer/iqiyi/mozhua/wwzy/ikun/wolong/hwba 这 9 个 key 是历史遗留名
 // （对应的老源已全部失效），现指向新的可用接口；key 名保持不变，避免影响前端已有引用。
+// listOnly: true —— 该源的列表接口可用、但关键词搜索不可用（实测：返回「暂不支持搜索」/
+// code!=1 / 403 / Cloudflare 挑战页）。标记后搜索链路直接跳过它（不发请求），
+// 「最近更新」仍照常拉取；设置面板里会显示「仅列表」标记。
 const API_SITES = {
     dyttzy: {
         api: 'http://caiji.dyttzyapi.com/api.php/provide/vod',
@@ -31,6 +34,7 @@ const API_SITES = {
     tyyszy: {
         api: 'https://tyyszy.com/api.php/provide/vod',
         name: '天涯资源',
+        listOnly: true,
     },
     xiaomaomi: {
         api: 'https://www.hongniuzy2.com/api.php/provide/vod/',
@@ -52,10 +56,12 @@ const API_SITES = {
     iqiyi: {
         api: 'https://suoniapi.com/api.php/provide/vod/',
         name: '索尼资源',
+        listOnly: true,
     },
     wolong: {
         api: 'https://caiji.kuaichezy.org/api.php/provide/vod/',
         name: '快车资源',
+        listOnly: true,
     }, 
     hwba: {
         api: 'https://caiji.xgzyapi.com/api.php/provide/vod/',
@@ -69,10 +75,12 @@ const API_SITES = {
     dbzy: {
         api: 'https://dbzy.tv/api.php/provide/vod',
         name: '豆瓣资源',
+        listOnly: true,
     },
     mozhua: {
         api: 'https://sdzyapi.com/api.php/provide/vod/',
         name: '闪电资源',
+        listOnly: true,
     },
     mdzy: {
         api: 'https://www.mdzyapi.com/api.php/provide/vod',
@@ -84,7 +92,8 @@ const API_SITES = {
     },
     yinghua: {
         api: 'https://m3u8.apiyhzy.com/api.php/provide/vod',
-        name: '樱花资源'
+        name: '樱花资源',
+        listOnly: true,
     },
     baidu: {
         api: 'https://api.apibdzy.com/api.php/provide/vod',
@@ -92,7 +101,8 @@ const API_SITES = {
     },
     wujin: {
         api: 'https://api.wujinapi.me/api.php/provide/vod',
-        name: '无尽资源'
+        name: '无尽资源',
+        listOnly: true,
     },
     wwzy: {
         api: 'https://jyzyapi.com/api.php/provide/vod/',
@@ -105,6 +115,15 @@ const API_SITES = {
     lzi: {
         api: 'https://cj.lziapi.com/api.php/provide/vod/',
         name: '量子资源站'
+    },
+    // 新增源（2026-11-05 实测：列表 code=1/最新条目在 7 天内 + 关键词搜索有结果，各连测 2 次均通过）
+    subo: {
+        api: 'https://subocaiji.com/api.php/provide/vod',
+        name: '速播资源'
+    },
+    xinlang: {
+        api: 'https://api.xinlangapi.com/xinlangapi.php/provide/vod',
+        name: '新浪资源'
     },
     //ARCHIVE https://telegra.ph/APIs-08-12
 };

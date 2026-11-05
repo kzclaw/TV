@@ -876,6 +876,19 @@ function updateSourceHealthUI() {
         } else if (!skipped.includes(sourceKey) && marker) {
             marker.remove();
         }
+
+        // 仅列表可用的源：搜索会被跳过，但最近更新里仍有它
+        const listOnlyMarker = label.querySelector('.source-listonly-mark');
+        const listOnly = !!(API_SITES[sourceKey] && API_SITES[sourceKey].listOnly);
+        if (listOnly && !listOnlyMarker) {
+            const span = document.createElement('span');
+            span.className = 'source-listonly-mark text-yellow-500 ml-1';
+            span.textContent = '仅列表';
+            span.title = '该源不支持关键词搜索（搜索时跳过），最近更新仍包含它';
+            label.appendChild(span);
+        } else if (!listOnly && listOnlyMarker) {
+            listOnlyMarker.remove();
+        }
     });
 
     const statusEl = document.getElementById('siteStatus');

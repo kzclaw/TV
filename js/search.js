@@ -14,6 +14,11 @@ async function searchByAPIAndKeyWord(apiId, query) {
         } else {
             // 内置API
             if (!API_SITES[apiId]) return [];
+            // 仅列表可用的源：搜索接口实测不可用，跳过以免空转等待（最近更新仍会拉取它）
+            if (API_SITES[apiId].listOnly) {
+                console.info(`API ${apiId} 仅支持列表，搜索跳过`);
+                return [];
+            }
             apiBaseUrl = API_SITES[apiId].api;
             apiUrl = apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
             apiName = API_SITES[apiId].name;
