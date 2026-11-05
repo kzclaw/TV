@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JS syntax check
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            # 复制成 .mjs 让 Node 按 ES Module 解析（仓库里既有 import/export 也有传统脚本）
+            cp "$f" /tmp/_check.mjs
+            if ! node --check /tmp/_check.mjs; then
+              echo "::error file=$f::syntax error"
+              fail=1
+            fi
+          done < <(git ls-files '*.js')
+          exit $fail
+
+      - name: JSON check
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"               || { echo "::error file=$f::invalid JSON"; exit 1; }
+          done < <(git ls-files '*.json')
+
+      - name: Brand check
+        run: |
+          set -euo pipefail
+          # 第 1 层（严格）：除依法需要声明来源的文件外，任何上游标识都算失败。
+          # 白名单：
+          #   LICENSE               —— AGPL §5(d) 来源声明 + AGPL 全文
+          #   README.md / about.html —— 来源声明与 Corresponding Source 提供方式
+          #   js/app.js             —— 'LibreTV-Settings'，为兼容老配置文件（见方案 A-17）
+          #   functions/proxy/*      —— LIBRETV_PROXY_KV，现网已绑定的环境变量名
+          #   .github/workflows/ci.yml —— 本文件自身（grep pattern 与注释里必然含品牌词）
+          hits=$(git grep -niE 'libretv|librespark|bestzwei' -- .             ':!libs/' ':!LICENSE' ':!README.md' ':!about.html'             ':!js/app.js' ':!functions/proxy/*' ':!.github/workflows/ci.yml' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::上游标识残留："
+            echo "$hits"
+            exit 1
+          fi
+          # 第 2 层（精确）：旧域名必须彻底消失，任何文件都不允许残留。
+          old=$(git grep -niE 'is-an\.org' -- . ':!libs/' || true)
+          if [ -n "$old" ]; then
+            echo "::error::旧域名残留："
+            echo "$old"
+            exit 1
+          fi
+          echo "品牌检查通过"
+
+      - name: Asset check
+        run: |
+          set -euo pipefail
+          for f in image/logo.svg image/logo-dark.svg image/logo.png \
+                   image/logo-black.png image/logo-192.png manifest.json; do
+            [ -f "$f" ] || { echo "::error file=$f::missing"; exit 1; }
+          done
+          # 图标必须真的在 manifest 里
+          node -e "
+            const m = require('./manifest.json');
+            const fs = require('fs');
+            if (!m.icons || m.icons.length < 2) throw new Error('icons 少于 2 张');
+            for (const i of m.icons) {
+              if (!fs.existsSync(i.src)) throw new Error('icon 不存在: ' + i.src);
+              if (!i.purpose) throw new Error('icon 缺 purpose: ' + i.src);
+            }
+          "
+          echo "资产检查通过"
