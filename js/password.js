@@ -112,8 +112,11 @@ async function sha256(message) {
 function showPasswordModal() {
     const passwordModal = document.getElementById('passwordModal');
     if (passwordModal) {
-        // 防止出现豆瓣区域滚动条
-        document.getElementById('doubanArea').classList.add('hidden');
+        // 防止出现最近更新区块滚动条
+        const latestArea = document.getElementById('latestArea');
+        if (latestArea) {
+            latestArea.classList.add('hidden');
+        }
         document.getElementById('passwordCancelBtn').classList.add('hidden');
 
         // 检查是否需要强制设置密码
@@ -174,10 +177,13 @@ function hidePasswordModal() {
 
         passwordModal.style.display = 'none';
 
-        // 如果启用豆瓣区域则显示豆瓣区域
-        if (localStorage.getItem('doubanEnabled') === 'true') {
-            document.getElementById('doubanArea').classList.remove('hidden');
-            initDouban();
+        // 如果开启首页最近更新则显示最近更新区块
+        if (localStorage.getItem('latestEnabled') === 'true') {
+            const latestArea = document.getElementById('latestArea');
+            if (latestArea) {
+                latestArea.classList.remove('hidden');
+            }
+            initLatestUpdates();
         }
     }
 }

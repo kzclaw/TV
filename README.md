@@ -61,7 +61,7 @@ css/                  样式
 js/                   前端逻辑（config / api / player / search / ...）
 functions/
   _middleware.js      Pages Function 中间件
-  proxy/[[path]].js   代理接口（搜索、详情、豆瓣）
+  proxy/[[path]].js   代理接口（搜索、详情、最近更新）
 libs/                 第三方库（ArtPlayer / hls.js / Tailwind / js-sha256）
 image/                图标与静态图
 ```

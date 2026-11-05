@@ -35,8 +35,8 @@ document.addEventListener('DOMContentLoaded', function () {
         localStorage.setItem('yellowFilterEnabled', 'true');
         localStorage.setItem(PLAYER_CONFIG.adFilteringStorage, 'true');
 
-        // 默认启用豆瓣功能
-        localStorage.setItem('doubanEnabled', 'true');
+        // 默认启用首页最近更新
+        localStorage.setItem('latestEnabled', 'true');
 
         // 标记已初始化默认值
         localStorage.setItem('hasInitializedDefaults', 'true');
@@ -578,9 +578,9 @@ function resetSearchArea() {
         footer.style.position = '';
     }
 
-    // 如果有豆瓣功能，检查是否需要显示豆瓣推荐区域
-    if (typeof updateDoubanVisibility === 'function') {
-        updateDoubanVisibility();
+    // 如果开启首页最近更新，检查是否需要显示最近更新区块
+    if (typeof updateLatestVisibility === 'function') {
+        updateLatestVisibility();
     }
 
     // 重置URL为主页
@@ -595,6 +595,11 @@ function resetSearchArea() {
     } catch (e) {
         console.error('更新浏览器历史失败:', e);
     }
+}
+
+// 重置到首页
+function resetToHome() {
+    resetSearchArea();
 }
 
 // 获取自定义API信息
@@ -699,15 +704,15 @@ async function search() {
     }
 }
 
-// 显示结果区域（隐藏搜索区与豆瓣推荐区）
+// 显示结果区域（隐藏搜索区与最近更新区块）
 function showResultsArea() {
     document.getElementById('searchArea').classList.remove('flex-1');
     document.getElementById('searchArea').classList.add('mb-8');
     document.getElementById('resultsArea').classList.remove('hidden');
 
-    const doubanArea = document.getElementById('doubanArea');
-    if (doubanArea) {
-        doubanArea.classList.add('hidden');
+    const latestArea = document.getElementById('latestArea');
+    if (latestArea) {
+        latestArea.classList.add('hidden');
     }
 }
 
@@ -817,33 +822,6 @@ function renderResults(items) {
     }).join('');
 
     resultsDiv.innerHTML = safeResults;
-}
-
-// 最近更新：拉取各源最新列表，复用搜索结果的渲染
-async function loadLatestUpdates() {
-    showLoading('正在加载最近更新...');
-
-    try {
-        const response = await fetch('/api/latest');
-        const data = await response.json();
-
-        if (!data || data.code !== 200) {
-            throw new Error((data && data.msg) || '获取失败');
-        }
-
-        const items = applyYellowFilter(Array.isArray(data.list) ? data.list : []);
-
-        showResultsArea();
-        renderResults(items);
-
-        // 刷新源状态标记（连续失败的源会被跳过）
-        updateSourceHealthUI();
-    } catch (error) {
-        console.error('最近更新获取失败:', error);
-        showToast('最近更新获取失败，请稍后重试', 'error');
-    } finally {
-        hideLoading();
-    }
 }
 
 // 把连续失败被跳过的源标记出来（复用设置面板里的源列表与状态显示）
@@ -1094,9 +1072,9 @@ function showVideoPlayer(url) {
     if (detailModal) {
         detailModal.classList.add('hidden');
     }
-    // 临时隐藏搜索结果和豆瓣区域，防止高度超出播放器而出现滚动条
+    // 临时隐藏搜索结果和最近更新区块，防止高度超出播放器而出现滚动条
     document.getElementById('resultsArea').classList.add('hidden');
-    document.getElementById('doubanArea').classList.add('hidden');
+    document.getElementById('latestArea').classList.add('hidden');
     // 在框架中打开播放页面
     videoPlayerFrame = document.createElement('iframe');
     videoPlayerFrame.id = 'VideoPlayerFrame';
@@ -1119,9 +1097,9 @@ function closeVideoPlayer(home = false) {
         if (detailModal) {
             detailModal.classList.add('hidden');
         }
-        // 如果启用豆瓣区域则显示豆瓣区域
-        if (localStorage.getItem('doubanEnabled') === 'true') {
-            document.getElementById('doubanArea').classList.remove('hidden');
+        // 如果开启首页最近更新则显示最近更新区块
+        if (localStorage.getItem('latestEnabled') === 'true') {
+            document.getElementById('latestArea').classList.remove('hidden');
         }
     }
     if (home) {
@@ -1365,7 +1343,7 @@ async function exportConfig() {
         'customAPIs',
         'yellowFilterEnabled',
         'adFilteringEnabled',
-        'doubanEnabled',
+        'latestEnabled',
         'hasInitializedDefaults'
     ];
 

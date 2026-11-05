@@ -746,6 +746,294 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
     };
 })();
 
+// ==== 最近更新区块（首页） ====
+// 数据来自 /api/latest：各源最新列表合并、按 vod_time 倒序，分类取 Apple CMS 的 type_name
+const LATEST_ALL_CATEGORY = '全部';
+const LATEST_OTHER_CATEGORY = '其他';
+// 无封面时的占位图（内联 SVG，不依赖外部图片服务）
+const LATEST_PLACEHOLDER_IMAGE = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450'%3E%3Crect width='300' height='450' fill='%23111'/%3E%3Ctext x='150' y='225' fill='%23666' font-size='18' text-anchor='middle'%3E暂无封面%3C/text%3E%3C/svg%3E";
+
+let latestItems = [];                          // 已加载的最近更新数据
+let latestCategory = LATEST_ALL_CATEGORY;      // 当前选中的分类
+let latestLoading = false;                     // 防止重复请求
+let latestInitialized = false;                 // 事件只绑定一次
+
+// 开关是否开启（首次访问默认开启）
+function isLatestEnabled() {
+    let value = localStorage.getItem('latestEnabled');
+    if (value === null) {
+        localStorage.setItem('latestEnabled', 'true');
+        value = 'true';
+    }
+    return value === 'true';
+}
+
+// 根据设置更新最近更新区块的显示状态
+function updateLatestVisibility() {
+    const latestArea = document.getElementById('latestArea');
+    if (!latestArea) return;
+
+    const resultsArea = document.getElementById('resultsArea');
+    const isSearching = resultsArea && !resultsArea.classList.contains('hidden');
+
+    // 只有在开启且没有搜索结果显示时才显示最近更新区块
+    if (isLatestEnabled() && !isSearching) {
+        latestArea.classList.remove('hidden');
+        // 没有数据时自动加载一次
+        if (!latestItems.length) {
+            loadLatestUpdates();
+        }
+    } else {
+        latestArea.classList.add('hidden');
+    }
+}
+
+// 取分类名：没有 type_name 的归入「其他」
+function getLatestCategoryName(item) {
+    const typeName = item && item.type_name ? String(item.type_name).trim() : '';
+    return typeName || LATEST_OTHER_CATEGORY;
+}
+
+// 分类标签列表：完全由实际加载到的数据生成，按条目数降序，同数量按名称排
+function getLatestCategories() {
+    const counts = new Map();
+    latestItems.forEach(item => {
+        const name = getLatestCategoryName(item);
+        counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'))
+        .map(entry => entry[0]);
+}
+
+// 渲染分类标签（默认选中「全部」）
+function renderLatestTags() {
+    const tagContainer = document.getElementById('latest-tags');
+    if (!tagContainer) return;
+
+    tagContainer.innerHTML = '';
+
+    const addTag = (label, name) => {
+        const btn = document.createElement('button');
+
+        let btnClass = 'py-1.5 px-3.5 rounded text-sm font-medium transition-all duration-300 border ';
+        if (name === latestCategory) {
+            btnClass += 'bg-pink-600 text-white shadow-md border-white';
+        } else {
+            btnClass += 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#333] hover:border-white';
+        }
+        btn.className = btnClass;
+        btn.textContent = label;
+
+        btn.addEventListener('click', () => {
+            if (latestCategory === name) return;
+            latestCategory = name;
+            renderLatestTags();
+            // 只重绘网格，不重新拉数据
+            renderLatestCards(filterLatestItems());
+        });
+
+        tagContainer.appendChild(btn);
+    };
+
+    addTag(LATEST_ALL_CATEGORY, LATEST_ALL_CATEGORY);
+    getLatestCategories().forEach(name => addTag(name, name));
+}
+
+// 按当前分类过滤已加载的列表
+function filterLatestItems() {
+    if (latestCategory === LATEST_ALL_CATEGORY) return latestItems;
+    return latestItems.filter(item => getLatestCategoryName(item) === latestCategory);
+}
+
+// 渲染最近更新卡片
+function renderLatestCards(items) {
+    const container = document.getElementById('latest-results');
+    if (!container) return;
+
+    const fragment = document.createDocumentFragment();
+
+    if (!items || items.length === 0) {
+        const emptyEl = document.createElement('div');
+        emptyEl.className = 'col-span-full text-center py-8';
+        emptyEl.innerHTML = '<div class="text-pink-500">❌ 暂无数据，请稍后重试</div>';
+        fragment.appendChild(emptyEl);
+    } else {
+        items.forEach(item => fragment.appendChild(createLatestCard(item)));
+    }
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+}
+
+// 构造单张卡片（动态文本全部走 textContent，避免 XSS / 破版）
+function createLatestCard(item) {
+    const title = item.vod_name ? String(item.vod_name) : '';
+    const source = item.source_name ? String(item.source_name) : '';
+    const time = item.vod_time ? String(item.vod_time) : '';
+    const pic = item.vod_pic ? String(item.vod_pic) : '';
+
+    const card = document.createElement('div');
+    card.className = 'bg-[#111] hover:bg-[#222] transition-all duration-300 rounded-lg overflow-hidden flex flex-col transform hover:scale-105 shadow-md hover:shadow-lg';
+
+    const cover = document.createElement('div');
+    cover.className = 'relative w-full aspect-[2/3] overflow-hidden cursor-pointer';
+    cover.addEventListener('click', () => fillAndSearchWithLatest(title));
+
+    const img = document.createElement('img');
+    img.className = 'w-full h-full object-cover transition-transform duration-500 hover:scale-110';
+    img.loading = 'lazy';
+    img.alt = title;
+    if (pic) {
+        img.src = pic;
+        img.addEventListener('error', () => {
+            img.onerror = null;
+            img.src = LATEST_PLACEHOLDER_IMAGE;
+            img.classList.add('object-contain');
+        });
+    } else {
+        img.src = LATEST_PLACEHOLDER_IMAGE;
+        img.classList.add('object-contain');
+    }
+    cover.appendChild(img);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60';
+    cover.appendChild(overlay);
+
+    if (source) {
+        const badge = document.createElement('div');
+        badge.className = 'absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm';
+        badge.textContent = source;
+        cover.appendChild(badge);
+    }
+    if (time) {
+        const badge = document.createElement('div');
+        badge.className = 'absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm';
+        badge.textContent = time;
+        cover.appendChild(badge);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'p-2 text-center bg-[#111]';
+
+    const titleBtn = document.createElement('button');
+    titleBtn.className = 'text-sm font-medium text-white truncate w-full hover:text-pink-400 transition';
+    titleBtn.title = title;
+    titleBtn.textContent = title;
+    titleBtn.addEventListener('click', () => fillAndSearchWithLatest(title));
+    info.appendChild(titleBtn);
+
+    card.appendChild(cover);
+    card.appendChild(info);
+    return card;
+}
+
+// 点击卡片：把标题填进搜索框并触发搜索
+function fillAndSearchWithLatest(title) {
+    if (!title) return;
+
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+
+    input.value = title;
+    if (typeof search === 'function') {
+        search();
+    }
+}
+
+// 加载最近更新数据并渲染标签与卡片
+async function loadLatestUpdates() {
+    if (latestLoading) return;
+    latestLoading = true;
+
+    const container = document.getElementById('latest-results');
+    if (container) {
+        container.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <div class="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin inline-block"></div>
+                <span class="text-pink-500 ml-4">加载中...</span>
+            </div>
+        `;
+    }
+
+    try {
+        const response = await fetch('/api/latest');
+        const data = await response.json();
+
+        if (!data || data.code !== 200) {
+            throw new Error((data && data.msg) || '获取失败');
+        }
+
+        const items = Array.isArray(data.list) ? data.list : [];
+        latestItems = typeof applyYellowFilter === 'function' ? applyYellowFilter(items) : items;
+
+        // 刷新后若原分类已不存在，回到「全部」
+        if (latestCategory !== LATEST_ALL_CATEGORY && !getLatestCategories().includes(latestCategory)) {
+            latestCategory = LATEST_ALL_CATEGORY;
+        }
+
+        renderLatestTags();
+        renderLatestCards(filterLatestItems());
+    } catch (error) {
+        console.error('最近更新获取失败:', error);
+        if (container) {
+            container.innerHTML = `
+                <div class="col-span-full text-center py-8">
+                    <div class="text-red-400">❌ 获取最近更新失败，请稍后重试</div>
+                </div>
+            `;
+        }
+        showToast('最近更新获取失败，请稍后重试', 'error');
+    } finally {
+        latestLoading = false;
+    }
+}
+
+// 初始化最近更新区块：开关状态 + 刷新按钮 + 自动加载
+function initLatestUpdates() {
+    if (!latestInitialized) {
+        latestInitialized = true;
+
+        const toggle = document.getElementById('latestToggle');
+        if (toggle) {
+            const isEnabled = isLatestEnabled();
+            toggle.checked = isEnabled;
+
+            const toggleBg = toggle.nextElementSibling;
+            const toggleDot = toggleBg.nextElementSibling;
+            if (isEnabled) {
+                toggleBg.classList.add('bg-pink-600');
+                toggleDot.classList.add('translate-x-6');
+            }
+
+            toggle.addEventListener('change', function (e) {
+                const isChecked = e.target.checked;
+                localStorage.setItem('latestEnabled', isChecked);
+
+                if (isChecked) {
+                    toggleBg.classList.add('bg-pink-600');
+                    toggleDot.classList.add('translate-x-6');
+                } else {
+                    toggleBg.classList.remove('bg-pink-600');
+                    toggleDot.classList.remove('translate-x-6');
+                }
+
+                updateLatestVisibility();
+            });
+        }
+
+        const refreshBtn = document.getElementById('latest-refresh');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => loadLatestUpdates());
+        }
+    }
+
+    updateLatestVisibility();
+}
+
+document.addEventListener('DOMContentLoaded', initLatestUpdates);
+
 async function testSiteAvailability(apiUrl) {
     try {
         // 使用更简单的测试查询
