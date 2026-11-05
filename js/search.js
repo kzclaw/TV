@@ -19,32 +19,23 @@ async function searchByAPIAndKeyWord(apiId, query) {
             apiName = API_SITES[apiId].name;
         }
         
-        // 添加超时处理
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        
-        // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
-            PROXY_URL + encodeURIComponent(apiUrl);
-        
-        const response = await fetch(proxiedUrl, {
-            headers: API_CONFIG.search.headers,
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
+        // 连续失败的源在跳过窗口内不再发请求
+        if (isSourceSkipped(apiId)) {
+            console.info(`API ${apiId} 连续失败，暂时跳过`);
             return [];
         }
-        
-        const data = await response.json();
-        
-        if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0) {
+
+        // 第一页结果
+        let data;
+        try {
+            data = await fetchSourceData(apiUrl, 15000);
+        } catch (error) {
+            console.warn(`API ${apiId} 搜索失败:`, error);
+            markSourceFailed(apiId);
             return [];
         }
-        
+        markSourceSucceeded(apiId);
+
         // 处理第一页结果
         const results = data.list.map(item => ({
             ...item,
@@ -52,46 +43,27 @@ async function searchByAPIAndKeyWord(apiId, query) {
             source_code: apiId,
             api_url: apiId.startsWith('custom_') ? getCustomApiInfo(apiId.replace('custom_', ''))?.url : undefined
         }));
-        
+
         // 获取总页数
         const pageCount = data.pagecount || 1;
         // 确定需要获取的额外页数 (最多获取maxPages页)
         const pagesToFetch = Math.min(pageCount - 1, API_CONFIG.search.maxPages - 1);
-        
+
         // 如果有额外页数，获取更多页的结果
         if (pagesToFetch > 0) {
             const additionalPagePromises = [];
-            
+
             for (let page = 2; page <= pagesToFetch + 1; page++) {
                 // 构建分页URL
                 const pageUrl = apiBaseUrl + API_CONFIG.search.pagePath
                     .replace('{query}', encodeURIComponent(query))
                     .replace('{page}', page);
-                
+
                 // 创建获取额外页的Promise
                 const pagePromise = (async () => {
                     try {
-                        const pageController = new AbortController();
-                        const pageTimeoutId = setTimeout(() => pageController.abort(), 15000);
-                        
-                        // 添加鉴权参数到代理URL
-                        const proxiedPageUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(pageUrl)) :
-                            PROXY_URL + encodeURIComponent(pageUrl);
-                        
-                        const pageResponse = await fetch(proxiedPageUrl, {
-                            headers: API_CONFIG.search.headers,
-                            signal: pageController.signal
-                        });
-                        
-                        clearTimeout(pageTimeoutId);
-                        
-                        if (!pageResponse.ok) return [];
-                        
-                        const pageData = await pageResponse.json();
-                        
-                        if (!pageData || !pageData.list || !Array.isArray(pageData.list)) return [];
-                        
+                        const pageData = await fetchSourceData(pageUrl, 15000);
+
                         // 处理当前页结果
                         return pageData.list.map(item => ({
                             ...item,
@@ -104,7 +76,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
                         return [];
                     }
                 })();
-                
+
                 additionalPagePromises.push(pagePromise);
             }
             

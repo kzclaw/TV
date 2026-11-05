@@ -12,6 +12,8 @@ const PASSWORD_CONFIG = {
 };
 
 // API站点配置
+// 注意：ruyi/xiaomaomi/heimuer/iqiyi/mozhua/wwzy/ikun/wolong/hwba 这 9 个 key 是历史遗留名
+// （对应的老源已全部失效），现指向新的可用接口；key 名保持不变，避免影响前端已有引用。
 const API_SITES = {
     dyttzy: {
         api: 'http://caiji.dyttzyapi.com/api.php/provide/vod',
@@ -19,8 +21,8 @@ const API_SITES = {
         detail: 'http://caiji.dyttzyapi.com', 
     },
     ruyi: {
-        api: 'https://cj.rycjapi.com/api.php/provide/vod',
-        name: '如意资源',
+        api: 'https://api.guangsuapi.com/api.php/provide/vod/',
+        name: '光速资源',
     },
     bfzy: {
         api: 'https://bfzyapi.com/api.php/provide/vod',
@@ -31,8 +33,8 @@ const API_SITES = {
         name: '天涯资源',
     },
     xiaomaomi: {
-        api: 'https://zy.xmm.hk/api.php/provide/vod',
-        name: '小猫咪资源',
+        api: 'https://www.hongniuzy2.com/api.php/provide/vod/',
+        name: '红牛资源',
     },
     ffzy: {
         api: 'http://ffzy5.tv/api.php/provide/vod',
@@ -40,25 +42,24 @@ const API_SITES = {
         detail: 'http://ffzy5.tv', 
     },
     heimuer: {
-        api: 'https://json.heimuer.xyz/api.php/provide/vod',
-        name: '黑木耳',
-        detail: 'https://heimuer.tv', 
+        api: 'https://hhzyapi.com/api.php/provide/vod/',
+        name: '豪华资源',
     },
     zy360: {
         api: 'https://360zy.com/api.php/provide/vod',
         name: '360资源',
     },
     iqiyi: {
-        api: 'https://www.iqiyizyapi.com/api.php/provide/vod',
-        name: 'iqiyi资源',
+        api: 'https://suoniapi.com/api.php/provide/vod/',
+        name: '索尼资源',
     },
     wolong: {
-        api: 'https://wolongzyw.com/api.php/provide/vod',
-        name: '卧龙资源',
+        api: 'https://caiji.kuaichezy.org/api.php/provide/vod/',
+        name: '快车资源',
     }, 
     hwba: {
-        api: 'https://cjhwba.com/api.php/provide/vod',
-        name: '华为吧资源',
+        api: 'https://caiji.xgzyapi.com/api.php/provide/vod/',
+        name: '西瓜资源',
     },
     jisu: {
         api: 'https://jszyapi.com/api.php/provide/vod',
@@ -70,8 +71,8 @@ const API_SITES = {
         name: '豆瓣资源',
     },
     mozhua: {
-        api: 'https://mozhuazy.com/api.php/provide/vod',
-        name: '魔爪资源',
+        api: 'https://sdzyapi.com/api.php/provide/vod/',
+        name: '闪电资源',
     },
     mdzy: {
         api: 'https://www.mdzyapi.com/api.php/provide/vod',
@@ -94,12 +95,12 @@ const API_SITES = {
         name: '无尽资源'
     },
     wwzy: {
-        api: 'https://wwzy.tv/api.php/provide/vod',
-        name: '旺旺短剧'
+        api: 'https://jyzyapi.com/api.php/provide/vod/',
+        name: '金鹰资源'
     },
     ikun: {
-        api: 'https://ikunzyapi.com/api.php/provide/vod',
-        name: 'iKun资源'
+        api: 'https://api.maoyanapi.top/api.php/provide/vod/',
+        name: '猫眼资源'
     },
     lzi: {
         api: 'https://cj.lziapi.com/api.php/provide/vod/',

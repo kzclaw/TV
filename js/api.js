@@ -1,3 +1,112 @@
+// ==== 源健康（熔断）====
+// 借鉴上游：连续失败的源先跳过一段时间，避免每次搜索都白等超时
+const SOURCE_HEALTH_KEY = 'kzTvSourceHealthV1'; // 带版本前缀，避免与旧缓存冲突
+const SOURCE_HEALTH_FAIL_LIMIT = 2;            // 连续失败次数达到该值即跳过
+const SOURCE_HEALTH_SKIP_MS = 30 * 60 * 1000;  // 跳过时长 30 分钟
+
+function getSourceHealthStore() {
+    try {
+        return JSON.parse(localStorage.getItem(SOURCE_HEALTH_KEY) || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveSourceHealthStore(store) {
+    try {
+        localStorage.setItem(SOURCE_HEALTH_KEY, JSON.stringify(store));
+    } catch (e) {
+        console.warn('源健康状态保存失败:', e);
+    }
+}
+
+// 连续失败达到阈值且仍在跳过窗口内 → 该源暂时不发请求
+function isSourceSkipped(sourceKey) {
+    const record = getSourceHealthStore()[sourceKey];
+    if (!record || record.count < SOURCE_HEALTH_FAIL_LIMIT) return false;
+    return Date.now() - (record.lastFailAt || 0) < SOURCE_HEALTH_SKIP_MS;
+}
+
+function markSourceFailed(sourceKey) {
+    const store = getSourceHealthStore();
+    const record = store[sourceKey] || { count: 0 };
+    store[sourceKey] = { count: (record.count || 0) + 1, lastFailAt: Date.now() };
+    saveSourceHealthStore(store);
+}
+
+// 成功一次即清零
+function markSourceSucceeded(sourceKey) {
+    const store = getSourceHealthStore();
+    if (!store[sourceKey]) return;
+    store[sourceKey] = { count: 0, lastFailAt: 0, lastOkAt: Date.now() };
+    saveSourceHealthStore(store);
+}
+
+function getSkippedSources() {
+    const store = getSourceHealthStore();
+    return Object.keys(store).filter(key => isSourceSkipped(key));
+}
+
+window.SourceHealth = {
+    isSourceSkipped,
+    markSourceFailed,
+    markSourceSucceeded,
+    getSkippedSources
+};
+
+// 解析 vod_time：兼容 "2026-11-05 18:22:07" 与 "2026-11-05"；无法解析返回 0（排序时排最后）
+function parseVodTime(value) {
+    if (!value || typeof value !== 'string') return 0;
+    const matched = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!matched) return 0;
+    const [, year, month, day, hour, minute, second] = matched;
+    const time = new Date(+year, +month - 1, +day, +(hour || 0), +(minute || 0), +(second || 0)).getTime();
+    return Number.isFinite(time) ? time : 0;
+}
+
+// 按更新时间倒序（新的在前）；时间相同或无法解析时按名称、来源排序
+function compareByVodTime(a, b) {
+    const timeDiff = parseVodTime(b.vod_time) - parseVodTime(a.vod_time);
+    if (timeDiff !== 0) return timeDiff;
+
+    const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
+    if (nameCompare !== 0) return nameCompare;
+
+    return (a.source_name || '').localeCompare(b.source_name || '');
+}
+
+// 采集源请求：统一走站点代理 + 超时控制；失败抛异常，便于统计熔断
+async function fetchSourceData(apiUrl, timeoutMs) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        // 添加鉴权参数到代理URL
+        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
+            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
+            PROXY_URL + encodeURIComponent(apiUrl);
+
+        const response = await fetch(proxiedUrl, {
+            headers: API_CONFIG.search.headers,
+            signal: controller.signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`请求失败: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data || !Array.isArray(data.list)) {
+            throw new Error('返回的数据格式无效');
+        }
+
+        return data;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 // 改进的API请求处理函数
 async function handleApiRequest(url) {
     const customApi = url.searchParams.get('customApi') || '';
@@ -197,6 +306,11 @@ async function handleApiRequest(url) {
             }
         }
 
+        // 最近更新
+        if (url.pathname === '/api/latest') {
+            return await handleLatestUpdates();
+        }
+
         throw new Error('未知的API路径');
     } catch (error) {
         console.error('API处理错误:', error);
@@ -368,45 +482,26 @@ async function handleAggregatedSearch(searchQuery) {
     
     // 创建所有API源的搜索请求
     const searchPromises = availableSources.map(async (source) => {
+        // 连续失败的源在跳过窗口内不再发请求
+        if (isSourceSkipped(source)) {
+            console.info(`${source}源连续失败，暂时跳过`);
+            return [];
+        }
+
         try {
             const apiUrl = `${API_SITES[source].api}${API_CONFIG.search.path}${encodeURIComponent(searchQuery)}`;
-            
-            // 使用Promise.race添加超时处理
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error(`${source}源搜索超时`)), 8000)
-            );
-            
-            // 添加鉴权参数到代理URL
-            const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
-                PROXY_URL + encodeURIComponent(apiUrl);
-            
-            const fetchPromise = fetch(proxiedUrl, {
-                headers: API_CONFIG.search.headers
-            });
-            
-            const response = await Promise.race([fetchPromise, timeoutPromise]);
-            
-            if (!response.ok) {
-                throw new Error(`${source}源请求失败: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            if (!data || !Array.isArray(data.list)) {
-                throw new Error(`${source}源返回的数据格式无效`);
-            }
-            
+            const data = await fetchSourceData(apiUrl, AGGREGATED_SEARCH_CONFIG.timeout);
+            markSourceSucceeded(source);
+
             // 为搜索结果添加源信息
-            const results = data.list.map(item => ({
+            return data.list.map(item => ({
                 ...item,
                 source_name: API_SITES[source].name,
                 source_code: source
             }));
-            
-            return results;
         } catch (error) {
             console.warn(`${source}源搜索失败:`, error);
+            markSourceFailed(source);
             return []; // 返回空数组表示该源搜索失败
         }
     });
@@ -444,15 +539,8 @@ async function handleAggregatedSearch(searchQuery) {
             }
         });
         
-        // 按照视频名称和来源排序
-        uniqueResults.sort((a, b) => {
-            // 首先按照视频名称排序
-            const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
-            if (nameCompare !== 0) return nameCompare;
-            
-            // 如果名称相同，则按照来源排序
-            return (a.source_name || '').localeCompare(b.source_name || '');
-        });
+        // 按更新时间倒序（新的在前），名称/来源仅作次要排序
+        uniqueResults.sort(compareByVodTime);
         
         return JSON.stringify({
             code: 200,
@@ -466,6 +554,52 @@ async function handleAggregatedSearch(searchQuery) {
             list: []
         });
     }
+}
+
+// 最近更新：各源拉取最新列表（不带关键词），合并后按更新时间倒序
+async function handleLatestUpdates() {
+    const availableSources = Object.keys(API_SITES).filter(key =>
+        key !== 'aggregated' && key !== 'custom'
+    );
+
+    const resultsArray = await Promise.all(availableSources.map(async (source) => {
+        // 连续失败的源在跳过窗口内不再发请求
+        if (isSourceSkipped(source)) {
+            console.info(`${source}源连续失败，暂时跳过`);
+            return [];
+        }
+
+        try {
+            const apiUrl = `${API_SITES[source].api}?ac=videolist`;
+            const data = await fetchSourceData(apiUrl, AGGREGATED_SEARCH_CONFIG.timeout);
+            markSourceSucceeded(source);
+
+            return data.list.map(item => ({
+                ...item,
+                source_name: API_SITES[source].name,
+                source_code: source
+            }));
+        } catch (error) {
+            console.warn(`${source}源获取最新更新失败:`, error);
+            markSourceFailed(source);
+            return [];
+        }
+    }));
+
+    let allResults = [];
+    resultsArray.forEach(results => {
+        if (Array.isArray(results) && results.length > 0) {
+            allResults = allResults.concat(results);
+        }
+    });
+
+    // 按更新时间倒序（新的在前）
+    allResults.sort(compareByVodTime);
+
+    return JSON.stringify({
+        code: 200,
+        list: allResults.slice(0, 200)
+    });
 }
 
 // 处理多个自定义API源的聚合搜索

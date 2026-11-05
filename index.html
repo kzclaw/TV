@@ -232,6 +232,17 @@
                         </button>
                     </div>
                     
+                    <!-- 最近更新入口 -->
+                    <div class="flex justify-center mb-3">
+                        <button id="latestUpdatesBtn"
+                                onclick="loadLatestUpdates()"
+                                class="px-4 py-1.5 bg-[#222] hover:bg-[#333] border border-[#333] hover:border-white rounded-lg text-sm text-gray-300 hover:text-white transition-colors"
+                                aria-label="查看最近更新"
+                                title="查看各资源站最近更新的内容">
+                            最近更新
+                        </button>
+                    </div>
+
                     <!-- 添加最近搜索记录部分 -->
                     <div id="recentSearches" class="mt-4 flex flex-wrap gap-2" aria-label="最近搜索记录">
                         <!-- 这里会动态插入最近的搜索记录 -->
