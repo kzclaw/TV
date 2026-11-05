@@ -481,10 +481,6 @@ function initPlayer(videoUrl) {
                     }
                 }
 
-                // 创建新的HLS实例
-                const hls = new Hls(hlsConfig);
-                currentHls = hls;
-
                 // 跟踪是否已经显示错误
                 let errorDisplayed = false;
                 // 跟踪是否有错误发生
@@ -493,6 +489,11 @@ function initPlayer(videoUrl) {
                 let playbackStarted = false;
                 // 跟踪视频是否出现bufferAppendError
                 let bufferAppendErrorCount = 0;
+                // 代理回退最多重试一次，避免死循环
+                let proxyRetried = false;
+                // 网络类错误计数：上游不给 CORS 头 / 防盗链时 hls.js 常先报非致命错误反复重试，
+                // 攒够 2 次就改走代理（与参考实现的 attempt>=2 判定一致）
+                let networkErrorCount = 0;
 
                 // 监听视频播放事件
                 video.addEventListener('playing', function () {
@@ -509,8 +510,108 @@ function initPlayer(videoUrl) {
                     }
                 });
 
-                hls.loadSource(url);
-                hls.attachMedia(video);
+                // 直连失败（上游不给 CORS 头 / 防盗链）→ 改走同源代理重试一次
+                async function fallbackToProxy(oldHls) {
+                    proxyRetried = true;
+
+                    let hash = null;
+                    try {
+                        hash = window.ProxyAuth && window.ProxyAuth.getPasswordHash
+                            ? await window.ProxyAuth.getPasswordHash()
+                            : null;
+                    } catch (e) {
+                    }
+                    if (!hash) {
+                        showError('视频加载失败：无法获取代理鉴权信息');
+                        return;
+                    }
+
+                    try {
+                        oldHls.destroy();
+                    } catch (e) {
+                    }
+
+                    // 只带 auth、不带 t：t= 时间戳 10 分钟就过期，
+                    // 长视频播到一半的分片请求会全部 401。
+                    setupHls('/proxy/' + encodeURIComponent(url) + '?auth=' + encodeURIComponent(hash), true);
+                }
+
+                // 建立（或重建）HLS 实例
+                function setupHls(sourceUrl, viaProxy) {
+                    const hls = new Hls(hlsConfig);
+                    currentHls = hls;
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                        video.play().catch(e => {
+                        });
+                    });
+
+                    hls.on(Hls.Events.ERROR, function (event, data) {
+                        // 增加错误计数
+                        errorCount++;
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            networkErrorCount++;
+                        }
+
+                        // 处理bufferAppendError
+                        if (data.details === 'bufferAppendError') {
+                            bufferAppendErrorCount++;
+                            // 如果视频已经开始播放，则忽略这个错误
+                            if (playbackStarted) {
+                                return;
+                            }
+
+                            // 如果出现多次bufferAppendError但视频未播放，尝试恢复
+                            if (bufferAppendErrorCount >= 3) {
+                                hls.recoverMediaError();
+                            }
+                        }
+
+                        // 网络错误（清单/分片拉不到，典型是浏览器 CORS 拦截）且还没播起来：
+                        // 改走同源代理重试一次；已经在代理上就不再重试。
+                        // 致命错误立刻回退；非致命错误攒到第 2 次再回退（避免一次抖动就切代理）。
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !playbackStarted
+                            && !viaProxy && !proxyRetried && (data.fatal || networkErrorCount >= 2)) {
+                            fallbackToProxy(hls);
+                            return;
+                        }
+
+                        // 如果是致命错误，且视频未播放
+                        if (data.fatal && !playbackStarted) {
+                            // 尝试恢复错误
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    // 仅在多次恢复尝试后显示错误
+                                    if (errorCount > 3 && !errorDisplayed) {
+                                        errorDisplayed = true;
+                                        showError('视频加载失败，可能是格式不兼容或源不可用');
+                                    }
+                                    break;
+                            }
+                        }
+                    });
+
+                    // 监听分段加载事件
+                    hls.on(Hls.Events.FRAG_LOADED, function () {
+                        document.getElementById('player-loading').style.display = 'none';
+                    });
+
+                    // 监听级别加载事件
+                    hls.on(Hls.Events.LEVEL_LOADED, function () {
+                        document.getElementById('player-loading').style.display = 'none';
+                    });
+
+                    hls.loadSource(sourceUrl);
+                    hls.attachMedia(video);
+                }
+
+                setupHls(url, false);
 
                 // enable airplay, from https://github.com/video-dev/hls.js/issues/5989
                 // 检查是否已存在source元素，如果存在则更新，不存在则创建
@@ -525,60 +626,6 @@ function initPlayer(videoUrl) {
                     video.appendChild(sourceElement);
                 }
                 video.disableRemotePlayback = false;
-
-                hls.on(Hls.Events.MANIFEST_PARSED, function () {
-                    video.play().catch(e => {
-                    });
-                });
-
-                hls.on(Hls.Events.ERROR, function (event, data) {
-                    // 增加错误计数
-                    errorCount++;
-
-                    // 处理bufferAppendError
-                    if (data.details === 'bufferAppendError') {
-                        bufferAppendErrorCount++;
-                        // 如果视频已经开始播放，则忽略这个错误
-                        if (playbackStarted) {
-                            return;
-                        }
-
-                        // 如果出现多次bufferAppendError但视频未播放，尝试恢复
-                        if (bufferAppendErrorCount >= 3) {
-                            hls.recoverMediaError();
-                        }
-                    }
-
-                    // 如果是致命错误，且视频未播放
-                    if (data.fatal && !playbackStarted) {
-                        // 尝试恢复错误
-                        switch (data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                hls.startLoad();
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                // 仅在多次恢复尝试后显示错误
-                                if (errorCount > 3 && !errorDisplayed) {
-                                    errorDisplayed = true;
-                                    showError('视频加载失败，可能是格式不兼容或源不可用');
-                                }
-                                break;
-                        }
-                    }
-                });
-
-                // 监听分段加载事件
-                hls.on(Hls.Events.FRAG_LOADED, function () {
-                    document.getElementById('player-loading').style.display = 'none';
-                });
-
-                // 监听级别加载事件
-                hls.on(Hls.Events.LEVEL_LOADED, function () {
-                    document.getElementById('player-loading').style.display = 'none';
-                });
             }
         }
     });

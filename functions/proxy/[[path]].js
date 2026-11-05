@@ -19,6 +19,30 @@ const MEDIA_FILE_EXTENSIONS = [
 const MEDIA_CONTENT_TYPES = ['video/', 'audio/', 'image/'];
 // --- 常量结束 ---
 
+/**
+ * sha256 十六进制哈希（代理鉴权用，结果与浏览器端 js/sha256.js 一致）
+ */
+async function sha256Hex(text) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 二进制安全的 base64（KV 只能存字符串，分片必须这样存取，否则二进制会被 UTF-8 替换字符破坏） */
+function bytesToBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+}
+
+function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
 
 /**
  * 主要的 Pages Function 处理函数
@@ -29,7 +53,9 @@ export async function onRequest(context) {
     const url = new URL(request.url);
 
     // 验证鉴权（主函数调用）
-    const isValidAuth = await validateAuth(request, env);
+    // 鉴权哈希只算一次：validateAuth 与「重写分片 URL」共用
+    const serverPasswordHash = env.PASSWORD ? await sha256Hex(env.PASSWORD) : '';
+    const isValidAuth = await validateAuth(request, serverPasswordHash);
     if (!isValidAuth) {
         return new Response(JSON.stringify({
             success: false,
@@ -73,36 +99,21 @@ export async function onRequest(context) {
     // --- 辅助函数 ---
 
     // 验证代理请求的鉴权
-    async function validateAuth(request, env) {
+    async function validateAuth(request, serverPasswordHash) {
         const url = new URL(request.url);
         const authHash = url.searchParams.get('auth');
         const timestamp = url.searchParams.get('t');
-        
-        // 获取服务器端密码
-        const serverPassword = env.PASSWORD;
-        if (!serverPassword) {
+
+        if (!serverPasswordHash) {
             console.error('服务器未设置 PASSWORD 环境变量，代理访问被拒绝');
             return false;
         }
-        
-        // 使用 SHA-256 哈希算法（与其他平台保持一致）
-        // 在 Cloudflare Workers 中使用 crypto.subtle
-        try {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(serverPassword);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const serverPasswordHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            if (!authHash || authHash !== serverPasswordHash) {
-                console.warn('代理请求鉴权失败：密码哈希不匹配');
-                return false;
-            }
-        } catch (error) {
-            console.error('计算密码哈希失败:', error);
+
+        if (!authHash || authHash !== serverPasswordHash) {
+            console.warn('代理请求鉴权失败：密码哈希不匹配');
             return false;
         }
-        
+
         // 验证时间戳（10分钟有效期）
         if (timestamp) {
             const now = Date.now();
@@ -112,20 +123,8 @@ export async function onRequest(context) {
                 return false;
             }
         }
-        
-        return true;
-    }
 
-    // 验证鉴权（主函数调用）
-    if (!validateAuth(request, env)) {
-        return new Response('Unauthorized', { 
-            status: 401,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
-            }
-        });
+        return true;
     }
 
     // 输出调试日志 (需要设置 DEBUG: true 环境变量)
@@ -192,6 +191,23 @@ export async function onRequest(context) {
         });
     }
 
+    // 二进制 / JSON 原样透传（分片、密钥、图片、接口数据）
+    function createPassthroughResponse(bytes, responseHeaders, contentType, status) {
+        const headers = new Headers();
+        // 只透传这几个头：fetch 已经解压过，再把 content-encoding / content-length 带出去
+        // 会让浏览器二次解压而报错。content-range / accept-ranges 必须带，
+        // 否则拖进度条、BYTERANGE 分片的 206 请求会坏。
+        for (const name of ['content-type', 'accept-ranges', 'content-range', 'etag', 'last-modified']) {
+            const v = responseHeaders.get(name);
+            if (v) headers.set(name, v);
+        }
+        // API 的 JSON 数据必须保持新鲜（搜索结果 / 最近更新列表）：
+        // 原先沿用 24h 缓存，会让浏览器一天内看不到新内容；媒体文件仍走长缓存。
+        const isJsonContent = (contentType || '').toLowerCase().includes('application/json');
+        headers.set('Cache-Control', isJsonContent ? 'public, max-age=60' : `public, max-age=${CACHE_TTL}`);
+        return createResponse(bytes, status, headers);
+    }
+
     // 获取随机 User-Agent
     function getRandomUserAgent() {
         return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
@@ -242,12 +258,14 @@ export async function onRequest(context) {
 
     // 将目标 URL 重写为内部代理路径 (/proxy/...)
     function rewriteUrlToProxy(targetUrl) {
-        // 确保目标URL被正确编码，以便作为路径的一部分
-        return `/proxy/${encodeURIComponent(targetUrl)}`;
+        // 分片 / 密钥 / 初始化段都要经本站转发（上游不给 CORS 头时浏览器会拦死），
+        // 且必须带鉴权：validateAuth 强制要求 ?auth=<sha256(PASSWORD)>。
+        // 不带 t= —— 时间戳 10 分钟就过期，长视频播到一半会全 401。
+        return `/proxy/${encodeURIComponent(targetUrl)}?auth=${serverPasswordHash}`;
     }
 
-    // 获取远程内容及其类型
-    async function fetchContentWithType(targetUrl) {
+    // 获取远程内容及其类型（二进制安全：整段走 arrayBuffer，绝不用 text()）
+    async function fetchContentWithType(targetUrl, rangeHeader) {
         const headers = new Headers({
             'User-Agent': getRandomUserAgent(),
             'Accept': '*/*',
@@ -256,6 +274,10 @@ export async function onRequest(context) {
             // 尝试设置 Referer 为目标网站的域名，或者传递原始 Referer
             'Referer': request.headers.get('Referer') || new URL(targetUrl).origin
         });
+        // 透传 Range：hls.js 的 BYTERANGE 分片 / 拖动进度条都要靠它拿 206
+        if (rangeHeader) {
+            headers.set('Range', rangeHeader);
+        }
 
         try {
             // 直接请求目标 URL
@@ -269,11 +291,11 @@ export async function onRequest(context) {
                  throw new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 150)}`);
             }
 
-            // 读取响应内容为文本
-            const content = await response.text();
+            // 按字节读取：文本 / 二进制一视同仁，避免 text() 破坏 ts/mp4 分片
+            const buf = await response.arrayBuffer();
             const contentType = response.headers.get('Content-Type') || '';
-            logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 内容长度: ${content.length}`);
-            return { content, contentType, responseHeaders: response.headers }; // 同时返回原始响应头
+            logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 字节数: ${buf.byteLength}`);
+            return { bytes: new Uint8Array(buf), contentType, responseHeaders: response.headers, status: response.status };
 
         } catch (error) {
              logDebug(`请求彻底失败: ${targetUrl}: ${error.message}`);
@@ -282,14 +304,21 @@ export async function onRequest(context) {
         }
     }
 
-    // 判断是否是 M3U8 内容
-    function isM3u8Content(content, contentType) {
+    // 判断是否是 M3U8 内容（既看文本，也看字节前缀）
+    function isM3u8Content(bytes, contentType) {
         // 检查 Content-Type
         if (contentType && (contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegurl') || contentType.includes('audio/mpegurl'))) {
             return true;
         }
-        // 检查内容本身是否以 #EXTM3U 开头
-        return content && typeof content === 'string' && content.trim().startsWith('#EXTM3U');
+        // 检查内容本身是否以 #EXTM3U 开头（二进制内容只看前 16 字节）
+        if (!bytes || !bytes.length) return false;
+        const head = new TextDecoder('utf-8').decode(bytes.subarray(0, 16)).trim();
+        return head.startsWith('#EXTM3U');
+    }
+
+    // 字节 → 文本（只有 m3u8 / JSON 用）
+    function decodeText(bytes) {
+        return new TextDecoder('utf-8').decode(bytes);
     }
 
     // 判断是否是媒体文件 (根据扩展名和 Content-Type) - 这部分在此代理中似乎未使用，但保留
@@ -429,7 +458,8 @@ export async function onRequest(context) {
 
         // --- 获取并处理选中的子 M3U8 ---
 
-        const cacheKey = `m3u8_processed:${bestVariantUrl}`; // 使用处理后的缓存键
+        // 缓存键带上鉴权哈希：重写后的分片 URL 里含 auth，改密码后旧缓存会 401
+        const cacheKey = `m3u8_processed:${bestVariantUrl}:${serverPasswordHash}`;
 
         let kvNamespace = null;
         try {
@@ -456,21 +486,15 @@ export async function onRequest(context) {
         }
 
         logDebug(`选择的子列表 (带宽: ${highestBandwidth}): ${bestVariantUrl}`);
-        const { content: variantContent, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl);
+        const { bytes: variantBytes, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl);
 
-        if (!isM3u8Content(variantContent, variantContentType)) {
+        if (!isM3u8Content(variantBytes, variantContentType)) {
             logDebug(`获取到的子列表 ${bestVariantUrl} 不是 M3U8 内容 (类型: ${variantContentType})。可能直接是媒体文件，返回原始内容。`);
-             // 如果不是M3U8，但看起来像媒体内容，直接返回代理后的内容
-             // 注意：这里可能需要决定是否直接代理这个非 M3U8 的 URL
-             // 为了简化，我们假设如果不是 M3U8，则流程中断或按原样处理
-             // 或者，尝试将其作为媒体列表处理？（当前行为）
-             // return createResponse(variantContent, 200, { 'Content-Type': variantContentType || 'application/octet-stream' });
              // 尝试按媒体列表处理，以防万一
-             return processMediaPlaylist(bestVariantUrl, variantContent);
-
+             return processMediaPlaylist(bestVariantUrl, decodeText(variantBytes));
         }
 
-        const processedVariant = await processM3u8Content(bestVariantUrl, variantContent, recursionDepth + 1, env);
+        const processedVariant = await processM3u8Content(bestVariantUrl, decodeText(variantBytes), recursionDepth + 1, env);
 
         if (kvNamespace) {
              try {
@@ -507,27 +531,32 @@ export async function onRequest(context) {
             if (!kvNamespace) throw new Error("KV 命名空间未绑定");
         } catch (e) {
             logDebug(`KV 命名空间 'LIBRETV_PROXY_KV' 访问出错或未绑定: ${e.message}`);
-            kvNamespace = null;
+            kvNamespace = null; // 确保设为 null
         }
 
-        if (kvNamespace) {
+        // Range 请求拿到的是片段，不能进缓存（否则后面的完整请求会拿到残缺数据）
+        const clientRange = request.headers.get('Range');
+        const cacheable = !!kvNamespace && !clientRange;
+
+        if (cacheable) {
             try {
                 const cachedDataJson = await kvNamespace.get(cacheKey); // 直接获取字符串
                 if (cachedDataJson) {
                     logDebug(`[缓存命中] 原始内容: ${targetUrl}`);
                     const cachedData = JSON.parse(cachedDataJson); // 解析 JSON
-                    const content = cachedData.body;
+                    // body 存 base64：KV 只能存字符串，直接存二进制会被 UTF-8 替换字符破坏
+                    const bytes = base64ToBytes(cachedData.body);
                     let headers = {};
                     try { headers = JSON.parse(cachedData.headers); } catch(e){} // 解析头部
                     const contentType = headers['content-type'] || headers['Content-Type'] || '';
 
-                    if (isM3u8Content(content, contentType)) {
+                    if (isM3u8Content(bytes, contentType)) {
                         logDebug(`缓存内容是 M3U8，重新处理: ${targetUrl}`);
-                        const processedM3u8 = await processM3u8Content(targetUrl, content, 0, env);
+                        const processedM3u8 = await processM3u8Content(targetUrl, decodeText(bytes), 0, env);
                         return createM3u8Response(processedM3u8);
                     } else {
                         logDebug(`从缓存返回非 M3U8 内容: ${targetUrl}`);
-                        return createResponse(content, 200, new Headers(headers));
+                        return createPassthroughResponse(bytes, new Headers(headers), contentType, 200);
                     }
                 } else {
                      logDebug(`[缓存未命中] 原始内容: ${targetUrl}`);
@@ -539,14 +568,14 @@ export async function onRequest(context) {
         }
 
         // --- 实际请求 ---
-        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
+        const { bytes, contentType, responseHeaders, status } = await fetchContentWithType(targetUrl, clientRange);
 
         // --- 写入缓存 (KV) ---
-        if (kvNamespace) {
+        if (cacheable) {
              try {
                  const headersToCache = {};
                  responseHeaders.forEach((value, key) => { headersToCache[key.toLowerCase()] = value; });
-                 const cacheValue = { body: content, headers: JSON.stringify(headersToCache) };
+                 const cacheValue = { body: bytesToBase64(bytes), headers: JSON.stringify(headersToCache) };
                  // 注意 KV 写入限制
                  waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: CACHE_TTL }));
                  logDebug(`已将原始内容写入缓存: ${targetUrl}`);
@@ -557,22 +586,13 @@ export async function onRequest(context) {
         }
 
         // --- 处理响应 ---
-        if (isM3u8Content(content, contentType)) {
+        if (isM3u8Content(bytes, contentType)) {
             logDebug(`内容是 M3U8，开始处理: ${targetUrl}`);
-            const processedM3u8 = await processM3u8Content(targetUrl, content, 0, env);
+            const processedM3u8 = await processM3u8Content(targetUrl, decodeText(bytes), 0, env);
             return createM3u8Response(processedM3u8);
         } else {
             logDebug(`内容不是 M3U8 (类型: ${contentType})，直接返回: ${targetUrl}`);
-            const finalHeaders = new Headers(responseHeaders);
-            // API 的 JSON 数据必须保持新鲜（搜索结果 / 最近更新列表）：
-            // 原先沿用 24h 缓存，会让浏览器一天内看不到新内容；媒体文件仍走长缓存。
-            const isJsonContent = (contentType || '').toLowerCase().includes('application/json');
-            finalHeaders.set('Cache-Control', isJsonContent ? 'public, max-age=60' : `public, max-age=${CACHE_TTL}`);
-            // 添加 CORS 头，确保非 M3U8 内容也能跨域访问（例如图片、字幕文件等）
-            finalHeaders.set("Access-Control-Allow-Origin", "*");
-            finalHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
-            finalHeaders.set("Access-Control-Allow-Headers", "*");
-            return createResponse(content, 200, finalHeaders);
+            return createPassthroughResponse(bytes, responseHeaders, contentType, status);
         }
 
     } catch (error) {
