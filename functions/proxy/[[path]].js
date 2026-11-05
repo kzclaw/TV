@@ -564,7 +564,10 @@ export async function onRequest(context) {
         } else {
             logDebug(`内容不是 M3U8 (类型: ${contentType})，直接返回: ${targetUrl}`);
             const finalHeaders = new Headers(responseHeaders);
-            finalHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
+            // API 的 JSON 数据必须保持新鲜（搜索结果 / 最近更新列表）：
+            // 原先沿用 24h 缓存，会让浏览器一天内看不到新内容；媒体文件仍走长缓存。
+            const isJsonContent = (contentType || '').toLowerCase().includes('application/json');
+            finalHeaders.set('Cache-Control', isJsonContent ? 'public, max-age=60' : `public, max-age=${CACHE_TTL}`);
             // 添加 CORS 头，确保非 M3U8 内容也能跨域访问（例如图片、字幕文件等）
             finalHeaders.set("Access-Control-Allow-Origin", "*");
             finalHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
