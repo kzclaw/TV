@@ -117,7 +117,11 @@ function showPasswordModal() {
         if (latestArea) {
             latestArea.classList.add('hidden');
         }
-        document.getElementById('passwordCancelBtn').classList.add('hidden');
+        // 取消按钮只存在于首页，播放页没有 —— 取不到就跳过，别让整页 JS 断在这里
+        const cancelBtn = document.getElementById('passwordCancelBtn');
+        if (cancelBtn) {
+            cancelBtn.classList.add('hidden');
+        }
 
         // 检查是否需要强制设置密码
         if (isPasswordRequired()) {

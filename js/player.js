@@ -419,8 +419,10 @@ function initPlayer(videoUrl) {
         maxMaxBufferLength: 60,
         maxBufferSize: 30 * 1000 * 1000,
         maxBufferHole: 0.5,
-        fragLoadingMaxRetry: 6,
-        fragLoadingMaxRetryTimeout: 64000,
+        // 分片失败要尽快暴露：默认 6 次重试 + 64s 超时会把致命错误拖到一两分钟，
+        // 期间页面一直卡在 readyState=1。收紧后失败立刻可见，可及时改走代理。
+        fragLoadingMaxRetry: 2,
+        fragLoadingMaxRetryTimeout: 10000,
         fragLoadingRetryDelay: 1000,
         manifestLoadingMaxRetry: 3,
         manifestLoadingRetryDelay: 1000,
@@ -491,9 +493,6 @@ function initPlayer(videoUrl) {
                 let bufferAppendErrorCount = 0;
                 // 代理回退最多重试一次，避免死循环
                 let proxyRetried = false;
-                // 网络类错误计数：上游不给 CORS 头 / 防盗链时 hls.js 常先报非致命错误反复重试，
-                // 攒够 2 次就改走代理（与参考实现的 attempt>=2 判定一致）
-                let networkErrorCount = 0;
 
                 // 监听视频播放事件
                 video.addEventListener('playing', function () {
@@ -549,9 +548,6 @@ function initPlayer(videoUrl) {
                     hls.on(Hls.Events.ERROR, function (event, data) {
                         // 增加错误计数
                         errorCount++;
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            networkErrorCount++;
-                        }
 
                         // 处理bufferAppendError
                         if (data.details === 'bufferAppendError') {
@@ -567,11 +563,13 @@ function initPlayer(videoUrl) {
                             }
                         }
 
-                        // 网络错误（清单/分片拉不到，典型是浏览器 CORS 拦截）且还没播起来：
-                        // 改走同源代理重试一次；已经在代理上就不再重试。
-                        // 致命错误立刻回退；非致命错误攒到第 2 次再回退（避免一次抖动就切代理）。
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !playbackStarted
-                            && !viaProxy && !proxyRetried && (data.fatal || networkErrorCount >= 2)) {
+                        // 网络错误（清单/分片拉不到，典型是浏览器 CORS 拦截或连接被关）且还没播起来：
+                        // 第一次就改走同源代理重试一次。分片被跨域拦掉时重试永远不会成功，
+                        // 等 hls.js 自己升级成致命错误要 1~2 分钟，页面会一直卡在 readyState=1。
+                        // 已经在代理上就不再回退，避免死循环。
+                        if (!playbackStarted && !viaProxy && !proxyRetried
+                            && (data.type === Hls.ErrorTypes.NETWORK_ERROR
+                                || data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR)) {
                             fallbackToProxy(hls);
                             return;
                         }
