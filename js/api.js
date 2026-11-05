@@ -556,7 +556,61 @@ async function handleAggregatedSearch(searchQuery) {
     }
 }
 
-// 最近更新：各源拉取最新列表（不带关键词），合并后按更新时间倒序
+// 采集单个源的最近更新：按 pg=1,2,3... 翻页，只留时间窗口（最近 7 天）内、且每个自然日
+// 未超配额的条目。某一页里最旧的条目已早于窗口 → 该源到此为止（不用再翻后面的页）。
+// 同一批的页并发发出：上游单页要 0.5~3s，逐页串行会累加到十几秒，首页等不起。
+async function collectLatestFromSource(source) {
+    const cutoff = Date.now() - LATEST_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const base = API_SITES[source].api;
+    const collected = [];
+    const perDayCount = new Map();
+
+    for (let first = 1; first <= LATEST_MAX_PAGES_PER_SOURCE; first += LATEST_PAGE_BATCH) {
+        const batch = [];
+        for (let pg = first; pg < first + LATEST_PAGE_BATCH && pg <= LATEST_MAX_PAGES_PER_SOURCE; pg++) {
+            batch.push(fetchSourceData(`${base}?ac=videolist&pg=${pg}`, LATEST_PAGE_TIMEOUT_MS)
+                .catch(error => {
+                    console.warn(`${source}源第 ${pg} 页获取失败:`, error);
+                    return null;
+                }));
+        }
+        const pages = await Promise.all(batch);
+
+        for (let i = 0; i < pages.length; i++) {
+            const data = pages[i];
+            const pg = first + i;
+            // 某页失败 → 该源就到此为止，用已取到的部分，不影响其它源
+            if (!data) {
+                if (pg === first) throw new Error(`${source}源第 ${pg} 页获取失败`);
+                return collected;
+            }
+
+            let oldest = 0;
+            for (const item of data.list) {
+                // vod_time 是本地时间字符串、无时区，parseVodTime 按浏览器本地时区解析
+                const time = parseVodTime(item.vod_time);
+                if (time && (!oldest || time < oldest)) oldest = time;
+                if (!time || time < cutoff) continue;                 // 窗口外直接丢弃
+                const day = String(item.vod_time).trim().slice(0, 10);
+                const used = perDayCount.get(day) || 0;
+                if (used >= LATEST_PER_DAY_PER_SOURCE) continue;      // 每个自然日的配额
+                perDayCount.set(day, used + 1);
+                collected.push({
+                    ...item,
+                    source_name: API_SITES[source].name,
+                    source_code: source
+                });
+            }
+
+            // 该页最旧的条目已早于 7 天窗口 → 不用再翻后面的页
+            if (oldest && oldest < cutoff) return collected;
+        }
+    }
+
+    return collected;
+}
+
+// 最近更新：各源分页拉取最近 7 天的更新列表（不带关键词），合并后按更新时间倒序
 async function handleLatestUpdates() {
     const availableSources = Object.keys(API_SITES).filter(key =>
         key !== 'aggregated' && key !== 'custom'
@@ -570,15 +624,9 @@ async function handleLatestUpdates() {
         }
 
         try {
-            const apiUrl = `${API_SITES[source].api}?ac=videolist`;
-            const data = await fetchSourceData(apiUrl, AGGREGATED_SEARCH_CONFIG.timeout);
+            const items = await collectLatestFromSource(source);
             markSourceSucceeded(source);
-
-            return data.list.map(item => ({
-                ...item,
-                source_name: API_SITES[source].name,
-                source_code: source
-            }));
+            return items;
         } catch (error) {
             console.warn(`${source}源获取最新更新失败:`, error);
             markSourceFailed(source);
@@ -598,7 +646,7 @@ async function handleLatestUpdates() {
 
     return JSON.stringify({
         code: 200,
-        list: allResults.slice(0, 200)
+        list: allResults.slice(0, LATEST_MAX_ITEMS)
     });
 }
 
@@ -750,6 +798,18 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
 // 数据来自 /api/latest：各源最新列表合并、按 vod_time 倒序，分类取 Apple CMS 的 type_name
 const LATEST_ALL_CATEGORY = '全部';
 const LATEST_OTHER_CATEGORY = '其他';
+// 时间窗口：最近 7 天（vod_time 是本地时间字符串、无时区，按浏览器本地时区与当前时间比较）
+const LATEST_WINDOW_DAYS = 7;
+// 单源翻页硬上限：防止个别源刷不出头把请求量打爆
+const LATEST_MAX_PAGES_PER_SOURCE = 8;
+// 每批发出的页数：同一批并发取，批内仍按页序处理（上游单页要 0.5~3s，逐页串行会累加到十几秒）
+const LATEST_PAGE_BATCH = 4;
+// 单页超时：实测上游单页 p99 约 3.2s，卡住的上游不能把整页首屏的预算吃光
+const LATEST_PAGE_TIMEOUT_MS = 2500;
+// 单源每个自然日最多保留的条数：需求是「看到最近 7 天有更新」，不是把 7 天的条目全倒出来
+const LATEST_PER_DAY_PER_SOURCE = 3;
+// 合并后的全局条数上限（兜底；每天配额已在采集阶段限好，不会把某一天整个砍掉）
+const LATEST_MAX_ITEMS = 400;
 // 无封面时的占位图（内联 SVG，不依赖外部图片服务）
 const LATEST_PLACEHOLDER_IMAGE = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450'%3E%3Crect width='300' height='450' fill='%23111'/%3E%3Ctext x='150' y='225' fill='%23666' font-size='18' text-anchor='middle'%3E暂无封面%3C/text%3E%3C/svg%3E";
 
