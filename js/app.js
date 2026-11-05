@@ -731,14 +731,17 @@ function applyYellowFilter(items) {
 function renderResults(items) {
     const resultsDiv = document.getElementById('results');
 
+    // 同一部片在多个源的同名条目聚成一组，只出一张卡
+    const groups = aggregateResults(items);
+
     // 更新结果计数
     const searchResultsCount = document.getElementById('searchResultsCount');
     if (searchResultsCount) {
-        searchResultsCount.textContent = items.length;
+        searchResultsCount.textContent = groups.length;
     }
 
     // 如果没有结果
-    if (!items || items.length === 0) {
+    if (!groups || groups.length === 0) {
         resultsDiv.innerHTML = `
             <div class="col-span-full text-center py-16">
                 <svg class="mx-auto h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -753,30 +756,40 @@ function renderResults(items) {
     }
 
     // 添加XSS保护，使用textContent和属性转义
-    const safeResults = items.map(item => {
+    const safeResults = groups.map((group, index) => {
+        const item = group.items[0];
+        const multi = group.items.length > 1;
+
         const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
-        const safeName = (item.vod_name || '').toString()
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-        const sourceInfo = item.source_name ?
-            `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${item.source_name}</span>` : '';
         const sourceCode = item.source_code || '';
 
         // 添加API URL属性，用于详情获取
         const apiUrlAttr = item.api_url ?
-            `data-api-url="${item.api_url.replace(/"/g, '&quot;')}"` : '';
+            `data-api-url="${escapeText(item.api_url)}"` : '';
+
+        // 单源沿用原字段；多源用组内的年份/分类/封面与统一后的备注
+        const name = escapeText(multi ? group.name : (item.vod_name || ''));
+        const typeName = escapeText(multi ? (group.typeName || '') : (item.type_name || ''));
+        const year = escapeText(multi ? (group.year || '') : (item.vod_year || ''));
+        const remarks = escapeText(multi ? (group.remarks || '') : (item.vod_remarks || ''));
+        const pic = String((multi ? group.pic : item.vod_pic) || '');
 
         // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
-        const hasCover = item.vod_pic && item.vod_pic.startsWith('http');
+        const hasCover = pic.startsWith('http');
 
-        return `
-            <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
-                 onclick="showDetails('${safeId}','${safeName}','${sourceCode}')" ${apiUrlAttr}>
-                <div class="flex h-full">
+        // 底部来源位：单源显示源名，多源显示「N 个来源」
+        const sourceInfo = multi
+            ? `<span class="bg-pink-600 text-white text-xs px-2 py-0.5 rounded-full">${group.items.length} 个来源</span>`
+            : (item.source_name ?
+                `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${escapeText(item.source_name)}</span>` : '');
+        const expandHint = multi
+            ? '<div><span class="text-gray-500 text-xs">展开 ▾</span></div>'
+            : '';
+
+        const cardBody = `
                     ${hasCover ? `
                     <div class="relative flex-shrink-0 search-card-img-container">
-                        <img src="${item.vod_pic}" alt="${safeName}" 
+                        <img src="${escapeText(pic)}" alt="${name}" 
                              class="h-full w-full object-cover transition-transform hover:scale-110" 
                              onerror="this.onerror=null; this.src='https://via.placeholder.com/300x450?text=无封面'; this.classList.add('object-contain');"
                              loading="lazy">
@@ -785,20 +798,20 @@ function renderResults(items) {
                     
                     <div class="p-2 flex flex-col flex-grow">
                         <div class="flex-grow">
-                            <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${safeName}">${safeName}</h3>
+                            <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${name}">${name}</h3>
                             
                             <div class="flex flex-wrap ${hasCover ? '' : 'justify-center'} gap-1 mb-2">
-                                ${(item.type_name || '').toString().replace(/</g, '&lt;') ?
+                                ${typeName ?
                 `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-blue-500 text-blue-300">
-                                          ${(item.type_name || '').toString().replace(/</g, '&lt;')}
+                                          ${typeName}
                                       </span>` : ''}
-                                ${(item.vod_year || '') ?
+                                ${year ?
                 `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-purple-500 text-purple-300">
-                                          ${item.vod_year}
+                                          ${year}
                                       </span>` : ''}
                             </div>
                             <p class="text-gray-400 line-clamp-2 overflow-hidden ${hasCover ? '' : 'text-center'} mb-2">
-                                ${(item.vod_remarks || '暂无介绍').toString().replace(/</g, '&lt;')}
+                                ${remarks || '暂无介绍'}
                             </p>
                         </div>
                         
@@ -814,8 +827,30 @@ function renderResults(items) {
                                 </span>
                             </div>
                             -->
+                            ${expandHint}
                         </div>
+                    </div>`;
+
+        // 单源：点击直接打开该源详情（与聚合前完全一致）
+        if (!multi) {
+            return `
+            <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
+                 onclick="showDetails('${safeId}','${escapeInlineArg(item.vod_name || '')}','${sourceCode}')" ${apiUrlAttr}>
+                <div class="flex h-full">${cardBody}
+                </div>
+            </div>
+        `;
+        }
+
+        // 多源：点击展开来源列表，选一个源再打开该源详情
+        return `
+            <div class="card-hover bg-[#111] rounded-lg overflow-hidden transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md flex flex-col" ${apiUrlAttr}>
+                <div class="flex-1 min-h-0 cursor-pointer" onclick="toggleSourcePanel('source-panel-${index}')">
+                    <div class="flex h-full">${cardBody}
                     </div>
+                </div>
+                <div id="source-panel-${index}" class="hidden border-t border-gray-800 p-2 flex flex-col gap-1.5">
+                    ${buildSourceRows(group.items)}
                 </div>
             </div>
         `;

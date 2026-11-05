@@ -1,3 +1,46 @@
+// 展示用文本转义（动态文本一律走它，避免 XSS / 破版）
+function escapeText(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// 内联 onXXX="fn('...')" 里参数的转义：
+// 先按 JS 字符串规则转义（反斜杠、单引号），再按 HTML 属性规则转义，
+// 否则片名里的引号会提前闭合 JS 字符串。
+function escapeInlineArg(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// 展开/收起聚合卡片的来源列表
+function toggleSourcePanel(panelId) {
+    const panel = document.getElementById(panelId);
+    if (panel) panel.classList.toggle('hidden');
+}
+
+// 聚合卡片展开后的来源行：源名 + 备注，点击打开该源详情（复用现有的 showDetails 流程）
+function buildSourceRows(items) {
+    return (items || []).map(item => {
+        const safeId = item && item.vod_id ? String(item.vod_id).replace(/[^\w-]/g, '') : '';
+        const sourceCode = escapeInlineArg((item && item.source_code) || '');
+        const remark = compactRemarks(item && item.vod_remarks) || '';
+        return `
+            <div class="flex items-center justify-between gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-2.5 py-1.5 text-xs cursor-pointer hover:border-pink-600 hover:bg-pink-600/10 transition"
+                 onclick="showDetails('${safeId}','${escapeInlineArg((item && item.vod_name) || '')}','${sourceCode}')">
+                <span class="truncate text-gray-200">${escapeText((item && item.source_name) || '')}</span>
+                <span class="text-gray-500 shrink-0">${escapeText(remark)}</span>
+            </div>`;
+    }).join('');
+}
+
 // UI相关函数
 function toggleSettings(e) {
     // 强化的密码保护校验 - 防止绕过

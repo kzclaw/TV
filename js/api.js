@@ -788,10 +788,13 @@ function updateLatestVisibility() {
     }
 }
 
-// 取分类名：没有 type_name 的归入「其他」
+// 取分类名：同义不同名的分类先按别名表合并（别名表在 js/config.js，可随时调整）；
+// 没有 type_name 的归入「其他」
 function getLatestCategoryName(item) {
     const typeName = item && item.type_name ? String(item.type_name).trim() : '';
-    return typeName || LATEST_OTHER_CATEGORY;
+    if (!typeName) return LATEST_OTHER_CATEGORY;
+    const aliases = window.CATEGORY_ALIASES || {};
+    return aliases[typeName] || typeName;
 }
 
 // 分类标签列表：完全由实际加载到的数据生成，按条目数降序，同数量按名称排
@@ -853,13 +856,16 @@ function renderLatestCards(items) {
 
     const fragment = document.createDocumentFragment();
 
-    if (!items || items.length === 0) {
+    // 同一部片在多个源的同名条目聚成一组，只出一张卡
+    const groups = aggregateResults(items);
+
+    if (!groups || groups.length === 0) {
         const emptyEl = document.createElement('div');
         emptyEl.className = 'col-span-full text-center py-8';
         emptyEl.innerHTML = '<div class="text-pink-500">❌ 暂无数据，请稍后重试</div>';
         fragment.appendChild(emptyEl);
     } else {
-        items.forEach(item => fragment.appendChild(createLatestCard(item)));
+        groups.forEach((group, index) => fragment.appendChild(createLatestCard(group, index)));
     }
 
     container.innerHTML = '';
@@ -867,18 +873,30 @@ function renderLatestCards(items) {
 }
 
 // 构造单张卡片（动态文本全部走 textContent，避免 XSS / 破版）
-function createLatestCard(item) {
-    const title = item.vod_name ? String(item.vod_name) : '';
-    const source = item.source_name ? String(item.source_name) : '';
+function createLatestCard(group, index) {
+    const item = group.items[0];
+    const multi = group.items.length > 1;
+    const title = group.name ? String(group.name) : '';
+    const source = multi ? `${group.items.length} 个来源` : (item.source_name ? String(item.source_name) : '');
     const time = item.vod_time ? String(item.vod_time) : '';
-    const pic = item.vod_pic ? String(item.vod_pic) : '';
+    const picValue = multi ? group.pic : item.vod_pic;
+    const pic = picValue ? String(picValue) : '';
+
+    // 单源：点击填标题并搜索（与聚合前完全一致）；多源：点击展开来源列表
+    const activate = () => {
+        if (multi) {
+            toggleSourcePanel(`latest-source-panel-${index}`);
+        } else {
+            fillAndSearchWithLatest(title);
+        }
+    };
 
     const card = document.createElement('div');
     card.className = 'bg-[#111] hover:bg-[#222] transition-all duration-300 rounded-lg overflow-hidden flex flex-col transform hover:scale-105 shadow-md hover:shadow-lg';
 
     const cover = document.createElement('div');
     cover.className = 'relative w-full aspect-[2/3] overflow-hidden cursor-pointer';
-    cover.addEventListener('click', () => fillAndSearchWithLatest(title));
+    cover.addEventListener('click', activate);
 
     const img = document.createElement('img');
     img.className = 'w-full h-full object-cover transition-transform duration-500 hover:scale-110';
@@ -921,11 +939,21 @@ function createLatestCard(item) {
     titleBtn.className = 'text-sm font-medium text-white truncate w-full hover:text-pink-400 transition';
     titleBtn.title = title;
     titleBtn.textContent = title;
-    titleBtn.addEventListener('click', () => fillAndSearchWithLatest(title));
+    titleBtn.addEventListener('click', activate);
     info.appendChild(titleBtn);
 
     card.appendChild(cover);
     card.appendChild(info);
+
+    // 多源：展开各源列表，选一个源直接打开该源详情
+    if (multi) {
+        const panel = document.createElement('div');
+        panel.id = `latest-source-panel-${index}`;
+        panel.className = 'hidden border-t border-[#333] p-2 flex flex-col gap-1.5 bg-[#111]';
+        panel.innerHTML = buildSourceRows(group.items);
+        card.appendChild(panel);
+    }
+
     return card;
 }
 
