@@ -1616,28 +1616,6 @@ async function testVideoSourceSpeed(sourceKey, vodId) {
     }
 }
 
-// 格式化速度显示
-function formatSpeedDisplay(speedResult) {
-    if (speedResult.speed === -1) {
-        return `<span class="speed-indicator error">❌ ${speedResult.error}</span>`;
-    }
-    
-    const speed = speedResult.speed;
-    let className = 'speed-indicator good';
-    let icon = '🟢';
-    
-    if (speed > 2000) {
-        className = 'speed-indicator poor';
-        icon = '🔴';
-    } else if (speed > 1000) {
-        className = 'speed-indicator medium';
-        icon = '🟡';
-    }
-    
-    const note = speedResult.note ? ` (${speedResult.note})` : '';
-    return `<span class="${className}">${icon} ${speed}ms${note}</span>`;
-}
-
 async function showSwitchResourceModal() {
     const urlParams = new URLSearchParams(window.location.search);
     const currentSourceCode = urlParams.get('source');

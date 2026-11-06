@@ -107,12 +107,24 @@ async function fetchSourceData(apiUrl, timeoutMs) {
     }
 }
 
+// 让外部取消信号（弹窗关闭）也能中断内部请求：
+// 内部请求用的是自己的超时控制器，外部不介入的话，弹窗关了请求还在跑。
+function linkAbortSignal(externalSignal, controller) {
+    if (!externalSignal) return;
+    if (externalSignal.aborted) {
+        controller.abort();
+    } else {
+        externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+}
+
 // 改进的API请求处理函数
-async function handleApiRequest(url) {
+async function handleApiRequest(url, init) {
     const customApi = url.searchParams.get('customApi') || '';
     const customDetail = url.searchParams.get('customDetail') || '';
     const source = url.searchParams.get('source') || 'heimuer';
-    
+    const externalSignal = init && init.signal;
+
     try {
         if (url.pathname === '/api/search') {
             const searchQuery = url.searchParams.get('wd');
@@ -206,7 +218,7 @@ async function handleApiRequest(url) {
 
             // 对于有detail参数的源，都使用特殊处理方式
             if (sourceCode !== 'custom' && API_SITES[sourceCode].detail) {
-                return await handleSpecialSourceDetail(id, sourceCode);
+                return await handleSpecialSourceDetail(id, sourceCode, externalSignal);
             }
             
             // 如果是自定义API，并且传递了detail参数，尝试特殊处理
@@ -225,6 +237,7 @@ async function handleApiRequest(url) {
             // 添加超时处理
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000);
+            linkAbortSignal(externalSignal, controller);
             
             try {
                 // 添加鉴权参数到代理URL
@@ -391,7 +404,7 @@ async function handleCustomApiSpecialDetail(id, customApi) {
 }
 
 // 通用特殊源详情处理函数
-async function handleSpecialSourceDetail(id, sourceCode) {
+async function handleSpecialSourceDetail(id, sourceCode, externalSignal) {
     try {
         // 构建详情页URL（使用配置中的detail URL而不是api URL）
         const detailUrl = `${API_SITES[sourceCode].detail}/index.php/vod/detail/id/${id}.html`;
@@ -399,6 +412,7 @@ async function handleSpecialSourceDetail(id, sourceCode) {
         // 添加超时处理
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
+        linkAbortSignal(externalSignal, controller);
         
         // 添加鉴权参数到代理URL
         const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
@@ -556,14 +570,13 @@ async function handleAggregatedSearch(searchQuery) {
     }
 }
 
-// 采集单个源的最近更新：按 pg=1,2,3... 翻页，只留时间窗口（最近 7 天）内、且每个自然日
-// 未超配额的条目。某一页里最旧的条目已早于窗口 → 该源到此为止（不用再翻后面的页）。
+// 采集单个源的最近更新：按 pg=1,2,3... 翻页，只留时间窗口（最近 3 天）内的条目。
+// 某一页里最旧的条目已早于窗口 → 该源到此为止（不用再翻后面的页）。
 // 同一批的页并发发出：上游单页要 0.5~3s，逐页串行会累加到十几秒，首页等不起。
 async function collectLatestFromSource(source) {
     const cutoff = Date.now() - LATEST_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     const base = API_SITES[source].api;
     const collected = [];
-    const perDayCount = new Map();
 
     for (let first = 1; first <= LATEST_MAX_PAGES_PER_SOURCE; first += LATEST_PAGE_BATCH) {
         const batch = [];
@@ -591,10 +604,6 @@ async function collectLatestFromSource(source) {
                 const time = parseVodTime(item.vod_time);
                 if (time && (!oldest || time < oldest)) oldest = time;
                 if (!time || time < cutoff) continue;                 // 窗口外直接丢弃
-                const day = String(item.vod_time).trim().slice(0, 10);
-                const used = perDayCount.get(day) || 0;
-                if (used >= LATEST_PER_DAY_PER_SOURCE) continue;      // 每个自然日的配额
-                perDayCount.set(day, used + 1);
                 collected.push({
                     ...item,
                     source_name: API_SITES[source].name,
@@ -602,7 +611,7 @@ async function collectLatestFromSource(source) {
                 });
             }
 
-            // 该页最旧的条目已早于 7 天窗口 → 不用再翻后面的页
+            // 该页最旧的条目已早于窗口 → 不用再翻后面的页
             if (oldest && oldest < cutoff) return collected;
         }
     }
@@ -610,7 +619,7 @@ async function collectLatestFromSource(source) {
     return collected;
 }
 
-// 最近更新：各源分页拉取最近 7 天的更新列表（不带关键词），合并后按更新时间倒序
+// 最近更新：各源分页拉取最近 3 天的更新列表（不带关键词），合并后交给聚合层分组
 async function handleLatestUpdates() {
     const availableSources = Object.keys(API_SITES).filter(key =>
         key !== 'aggregated' && key !== 'custom'
@@ -641,12 +650,12 @@ async function handleLatestUpdates() {
         }
     });
 
-    // 按更新时间倒序（新的在前）
+    // 按更新时间倒序（新的在前）；分组与「2 个及以上源」的过滤在渲染层做（复用 aggregate.js）
     allResults.sort(compareByVodTime);
 
     return JSON.stringify({
         code: 200,
-        list: allResults.slice(0, LATEST_MAX_ITEMS)
+        list: allResults
     });
 }
 
@@ -769,7 +778,7 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
                 }
             }
             try {
-                const data = await handleApiRequest(requestUrl);
+                const data = await handleApiRequest(requestUrl, init);
                 return new Response(data, {
                     headers: {
                         'Content-Type': 'application/json',
@@ -798,22 +807,24 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
 // 数据来自 /api/latest：各源最新列表合并、按 vod_time 倒序，分类取 Apple CMS 的 type_name
 const LATEST_ALL_CATEGORY = '全部';
 const LATEST_OTHER_CATEGORY = '其他';
-// 时间窗口：最近 7 天（vod_time 是本地时间字符串、无时区，按浏览器本地时区与当前时间比较）
-const LATEST_WINDOW_DAYS = 7;
+// 时间窗口：最近 3 天（vod_time 是本地时间字符串、无时区，按浏览器本地时区与当前时间比较）
+const LATEST_WINDOW_DAYS = 3;
 // 单源翻页硬上限：防止个别源刷不出头把请求量打爆
 const LATEST_MAX_PAGES_PER_SOURCE = 8;
 // 每批发出的页数：同一批并发取，批内仍按页序处理（上游单页要 0.5~3s，逐页串行会累加到十几秒）
 const LATEST_PAGE_BATCH = 4;
-// 单页超时：实测上游单页 p99 约 3.2s，卡住的上游不能把整页首屏的预算吃光
-const LATEST_PAGE_TIMEOUT_MS = 2500;
-// 单源每个自然日最多保留的条数：需求是「看到最近 7 天有更新」，不是把 7 天的条目全倒出来
-const LATEST_PER_DAY_PER_SOURCE = 3;
-// 合并后的全局条数上限（兜底；每天配额已在采集阶段限好，不会把某一天整个砍掉）
+// 单页超时：上游单页 p99 约 3.2s。2.5s 时约四成页请求超时 → 对应源只能拿到第 1 页，
+// 卡片数在 180~400 之间跳；放宽到 3s 后采集稳定在 2900~3600 条。
+const LATEST_PAGE_TIMEOUT_MS = 3000;
+// 只保留「2 个及以上源都有」的片：同一部片在多个源都更新过才算最近更新
+const LATEST_MIN_SOURCES = 2;
+// 卡片数上限（兜底）
 const LATEST_MAX_ITEMS = 400;
 // 无封面时的占位图（内联 SVG，不依赖外部图片服务）
 const LATEST_PLACEHOLDER_IMAGE = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450'%3E%3Crect width='300' height='450' fill='%23111'/%3E%3Ctext x='150' y='225' fill='%23666' font-size='18' text-anchor='middle'%3E暂无封面%3C/text%3E%3C/svg%3E";
 
-let latestItems = [];                          // 已加载的最近更新数据
+let latestItems = [];                          // 已加载的最近更新原始条目
+let latestGroups = [];                         // 聚合后的分组（卡片数据源）
 let latestCategory = LATEST_ALL_CATEGORY;      // 当前选中的分类
 let latestLoading = false;                     // 防止重复请求
 let latestInitialized = false;                 // 事件只绑定一次
@@ -857,11 +868,33 @@ function getLatestCategoryName(item) {
     return aliases[typeName] || typeName;
 }
 
-// 分类标签列表：完全由实际加载到的数据生成，按条目数降序，同数量按名称排
+// 分组的分类名：组内各源的分类名先过别名表，再取出现最多的那个。
+// 同一部片在不同源常写不同分类名（「电影」/「动作片」），只取第一个会让分类筛选随机丢片。
+function getLatestGroupCategory(group) {
+    const counts = new Map();
+    (group.items || []).forEach(item => {
+        const name = getLatestCategoryName(item);
+        if (name === LATEST_OTHER_CATEGORY) return;   // 「其他」不算票，出现得再多次也是兜底
+        counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    if (!counts.size) return LATEST_OTHER_CATEGORY;
+
+    let best = LATEST_OTHER_CATEGORY;
+    let bestCount = 0;
+    counts.forEach((count, name) => {
+        if (count > bestCount) {
+            best = name;
+            bestCount = count;
+        }
+    });
+    return best;
+}
+
+// 分类标签列表：完全由实际加载到的数据生成，按卡片数降序，同数量按名称排
 function getLatestCategories() {
     const counts = new Map();
-    latestItems.forEach(item => {
-        const name = getLatestCategoryName(item);
+    latestGroups.forEach(group => {
+        const name = getLatestGroupCategory(group);
         counts.set(name, (counts.get(name) || 0) + 1);
     });
     return Array.from(counts.entries())
@@ -893,7 +926,7 @@ function renderLatestTags() {
             latestCategory = name;
             renderLatestTags();
             // 只重绘网格，不重新拉数据
-            renderLatestCards(filterLatestItems());
+            renderLatestCards(filterLatestGroups());
         });
 
         tagContainer.appendChild(btn);
@@ -903,21 +936,35 @@ function renderLatestTags() {
     getLatestCategories().forEach(name => addTag(name, name));
 }
 
-// 按当前分类过滤已加载的列表
-function filterLatestItems() {
-    if (latestCategory === LATEST_ALL_CATEGORY) return latestItems;
-    return latestItems.filter(item => getLatestCategoryName(item) === latestCategory);
+// 按当前分类过滤已加载的分组
+function filterLatestGroups() {
+    if (latestCategory === LATEST_ALL_CATEGORY) return latestGroups;
+    return latestGroups.filter(group => getLatestGroupCategory(group) === latestCategory);
+}
+
+// 组内更新时间最新的一条（卡片封面上的时间取它）
+function latestItemOf(group) {
+    return (group.items || []).reduce((best, item) =>
+        !best || parseVodTime(item.vod_time) > parseVodTime(best.vod_time) ? item : best, null);
+}
+
+// 最近更新的分组：复用 aggregate.js 的同名聚合，
+// 只保留「2 个及以上源都有」的片，按源数倒序（源多的排前面），源数相同按最近更新时间倒序。
+function buildLatestGroups(items) {
+    return aggregateResults(items)
+        .map(group => ({ group, time: parseVodTime((latestItemOf(group) || {}).vod_time) }))
+        .filter(entry => entry.group.sourceCount >= LATEST_MIN_SOURCES)
+        .sort((a, b) => b.group.sourceCount - a.group.sourceCount || b.time - a.time)
+        .slice(0, LATEST_MAX_ITEMS)
+        .map(entry => entry.group);
 }
 
 // 渲染最近更新卡片
-function renderLatestCards(items) {
+function renderLatestCards(groups) {
     const container = document.getElementById('latest-results');
     if (!container) return;
 
     const fragment = document.createDocumentFragment();
-
-    // 同一部片在多个源的同名条目聚成一组，只出一张卡
-    const groups = aggregateResults(items);
 
     if (!groups || groups.length === 0) {
         const emptyEl = document.createElement('div');
@@ -925,7 +972,7 @@ function renderLatestCards(items) {
         emptyEl.innerHTML = '<div class="text-pink-500">❌ 暂无数据，请稍后重试</div>';
         fragment.appendChild(emptyEl);
     } else {
-        groups.forEach((group, index) => fragment.appendChild(createLatestCard(group, index)));
+        groups.forEach(group => fragment.appendChild(createLatestCard(group)));
     }
 
     container.innerHTML = '';
@@ -933,19 +980,19 @@ function renderLatestCards(items) {
 }
 
 // 构造单张卡片（动态文本全部走 textContent，避免 XSS / 破版）
-function createLatestCard(group, index) {
-    const item = group.items[0];
-    const multi = group.items.length > 1;
+function createLatestCard(group) {
+    const latest = latestItemOf(group);
+    const multi = group.sourceCount > 1;
     const title = group.name ? String(group.name) : '';
-    const source = multi ? `${group.items.length} 个来源` : (item.source_name ? String(item.source_name) : '');
-    const time = item.vod_time ? String(item.vod_time) : '';
-    const picValue = multi ? group.pic : item.vod_pic;
+    // 封面显示该组最近一次的更新时间（组内最新的那条）
+    const time = latest && latest.vod_time ? String(latest.vod_time) : '';
+    const picValue = multi ? group.pic : (latest && latest.vod_pic);
     const pic = picValue ? String(picValue) : '';
 
-    // 单源：点击填标题并搜索（与聚合前完全一致）；多源：点击展开来源列表
+    // 单源：点击填标题并搜索；多源：点击打开多源弹窗（测速 + 选源）
     const activate = () => {
         if (multi) {
-            toggleSourcePanel(`latest-source-panel-${index}`);
+            openSourceModal(group);
         } else {
             fillAndSearchWithLatest(title);
         }
@@ -979,15 +1026,10 @@ function createLatestCard(group, index) {
     overlay.className = 'absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60';
     cover.appendChild(overlay);
 
-    if (source) {
-        const badge = document.createElement('div');
-        badge.className = 'absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm';
-        badge.textContent = source;
-        cover.appendChild(badge);
-    }
     if (time) {
+        // 只有一个角标（右下角）：之前「X 个来源」也在左下角，两条一起会挤在一起互相压字
         const badge = document.createElement('div');
-        badge.className = 'absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm';
+        badge.className = 'absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded-sm whitespace-nowrap';
         badge.textContent = time;
         cover.appendChild(badge);
     }
@@ -1005,15 +1047,6 @@ function createLatestCard(group, index) {
     card.appendChild(cover);
     card.appendChild(info);
 
-    // 多源：展开各源列表，选一个源直接打开该源详情
-    if (multi) {
-        const panel = document.createElement('div');
-        panel.id = `latest-source-panel-${index}`;
-        panel.className = 'hidden border-t border-[#333] p-2 flex flex-col gap-1.5 bg-[#111]';
-        panel.innerHTML = buildSourceRows(group.items);
-        card.appendChild(panel);
-    }
-
     return card;
 }
 
@@ -1029,6 +1062,283 @@ function fillAndSearchWithLatest(title) {
         search();
     }
 }
+
+// ==== 多源选择弹窗 ====
+// 最近更新的卡片点开：列出该片的各来源 → 并发测速（用各源详情接口的耗时当速度指标）
+// → 按速度从快到慢排 → 选中一个源后走现有的播放流程。
+// 样式与交互照播放器页的「切换资源」模块（封面卡 + 右上角速度角标 + 选中源详情）。
+const sourceModalState = {
+    controller: null,       // 关闭弹窗时用它中止在途测速请求
+    entries: [],            // 各来源：测速结果 + DOM 引用
+    selectedKey: '',        // 选中态绑稳定标识（源key_片id），不用数组下标
+    bodyOverflow: ''
+};
+
+// 来源在弹窗里的稳定标识：测速结果会重排，绑下标会指错源
+function sourceEntryKey(entry) {
+    return `${entry.sourceCode}_${entry.vodId}`;
+}
+
+// 组内同一源只留一条（取更新时间最新的那条）
+function latestPerSource(items) {
+    const bySource = new Map();
+    (items || []).forEach(item => {
+        if (!item || !item.source_code) return;
+        const prev = bySource.get(item.source_code);
+        if (!prev || parseVodTime(item.vod_time) > parseVodTime(prev.vod_time)) {
+            bySource.set(item.source_code, item);
+        }
+    });
+    return Array.from(bySource.values());
+}
+
+// 单个来源的卡片（与播放器页「切换资源」的卡片同款）
+function sourceEntryHtml(entry) {
+    const key = sourceEntryKey(entry);
+    return `
+        <div class="relative cursor-pointer hover:scale-105 transition-transform" data-source-key="${escapeText(key)}">
+            <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 relative">
+                <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt="${escapeText(entry.name)}"
+                     loading="lazy" class="w-full h-full object-cover">
+                <div class="absolute top-1 right-1 speed-badge bg-black bg-opacity-75" data-source-badge>
+                    <span class="speed-indicator">测速中</span>
+                </div>
+            </div>
+            <div class="mt-2">
+                <div class="text-xs font-medium text-gray-200 truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
+                <div class="text-[10px] text-gray-500 truncate" data-source-note></div>
+            </div>
+        </div>`;
+}
+
+// 打开多源弹窗
+function openSourceModal(group) {
+    const modal = document.getElementById('sourceModal');
+    const content = document.getElementById('sourceModalContent');
+    const title = document.getElementById('sourceModalTitle');
+    if (!modal || !content) return;
+
+    closeSourceModal();
+
+    sourceModalState.entries = latestPerSource(group.items).map(item => ({
+        sourceCode: item.source_code,
+        sourceName: item.source_name || '',
+        vodId: String(item.vod_id || ''),
+        name: item.vod_name || group.name || '',
+        pic: item.vod_pic || '',
+        speed: -1,
+        error: '',
+        episodes: 0,
+        pending: true,
+        card: null,
+        badge: null,
+        note: null
+    }));
+    sourceModalState.selectedKey = '';
+
+    if (title) title.textContent = group.name || '';
+
+    content.innerHTML = `
+        <div id="sourceModalGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            ${sourceModalState.entries.map(sourceEntryHtml).join('')}
+        </div>
+        <div id="sourceModalDetail" class="mt-4"></div>`;
+
+    content.querySelectorAll('[data-source-key]').forEach(card => {
+        const key = card.getAttribute('data-source-key');
+        const entry = sourceModalState.entries.find(item => sourceEntryKey(item) === key);
+        if (!entry) return;
+        entry.card = card;
+        entry.badge = card.querySelector('[data-source-badge]');
+        entry.note = card.querySelector('[data-source-note]');
+        const img = card.querySelector('img');
+        if (img) {
+            img.addEventListener('error', () => {
+                img.onerror = null;
+                img.src = LATEST_PLACEHOLDER_IMAGE;
+                img.classList.add('object-contain');
+            });
+        }
+        card.addEventListener('click', () => selectSourceEntry(key));
+    });
+
+    modal.classList.remove('hidden');
+    sourceModalState.bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // 并发测速：各源详情接口的耗时当速度指标
+    // （上游用的是服务端 /api/quality；我们是静态站，改成前端直接请求各源的详情接口）
+    const controller = new AbortController();
+    sourceModalState.controller = controller;
+    Promise.all(sourceModalState.entries.map(entry => probeSourceEntry(entry, controller.signal)))
+        .then(() => finishSourceModal())
+        .catch(() => finishSourceModal());
+}
+
+// 关闭弹窗：中止在途测速请求（上游特意做了这条：否则关了弹窗请求还在跑）
+function closeSourceModal() {
+    const modal = document.getElementById('sourceModal');
+    if (sourceModalState.controller) {
+        sourceModalState.controller.abort();
+        sourceModalState.controller = null;
+    }
+    sourceModalState.entries = [];
+    sourceModalState.selectedKey = '';
+    if (modal) modal.classList.add('hidden');
+    document.body.style.overflow = sourceModalState.bodyOverflow;
+    sourceModalState.bodyOverflow = '';
+}
+
+// 测速一个来源：请求该源的详情接口，用耗时当速度指标
+async function probeSourceEntry(entry, signal) {
+    const started = performance.now();
+    try {
+        const response = await fetch(
+            `/api/detail?id=${encodeURIComponent(entry.vodId)}&source=${encodeURIComponent(entry.sourceCode)}&_t=${Date.now()}`,
+            { signal }
+        );
+        const data = await response.json();
+        if (signal.aborted) return;
+
+        if (!data || data.code !== 200 || !Array.isArray(data.episodes) || !data.episodes.length) {
+            entry.error = (data && data.msg) || '无可用播放资源';
+        } else {
+            entry.speed = Math.round(performance.now() - started);
+            entry.episodes = data.episodes.length;
+        }
+    } catch (error) {
+        if (signal.aborted) return;
+        entry.error = (error && error.name === 'AbortError') ? '已取消' : ((error && error.message) || '测速失败');
+    }
+    entry.pending = false;
+    refreshSourceEntry(entry);
+}
+
+// 回填一个来源的测速结果（只改角标，不重建卡片：重建会让封面重复请求）
+function refreshSourceEntry(entry) {
+    if (entry.badge) {
+        entry.badge.innerHTML = entry.pending
+            ? '<span class="speed-indicator">测速中</span>'
+            : formatSpeedDisplay(entry.speed >= 0
+                ? { speed: entry.speed }
+                : { speed: -1, error: '失败' });
+    }
+    if (entry.note) {
+        entry.note.textContent = entry.pending ? '' : (entry.speed >= 0
+            ? `${entry.episodes} 集`
+            : (entry.error || '测速失败'));
+        entry.note.title = entry.note.textContent;
+        entry.note.className = entry.pending || entry.speed >= 0
+            ? 'text-[10px] text-gray-500 truncate'
+            : 'text-[10px] text-red-400 truncate';
+    }
+}
+
+// 测速结束：按速度重排（失败的排最后），默认选中最快的可用源
+function finishSourceModal() {
+    if (!sourceModalState.controller) return;      // 弹窗已关闭
+
+    const entries = sourceModalState.entries;
+    entries.forEach(entry => {
+        entry.pending = false;
+        refreshSourceEntry(entry);
+    });
+
+    const grid = document.getElementById('sourceModalGrid');
+    if (grid) {
+        [...entries]
+            .sort((a, b) => {
+                const speedA = a.speed >= 0 ? a.speed : Number.MAX_SAFE_INTEGER;
+                const speedB = b.speed >= 0 ? b.speed : Number.MAX_SAFE_INTEGER;
+                return speedA - speedB;
+            })
+            .forEach(entry => { if (entry.card) grid.appendChild(entry.card); });
+    }
+
+    const summary = document.getElementById('sourceModalSummary');
+    if (summary) {
+        const ok = entries.filter(entry => entry.speed >= 0).length;
+        summary.textContent = `来源 ${entries.length} · 可用 ${ok}`;
+    }
+
+    if (!sourceModalState.selectedKey) {
+        const fastest = entries.filter(entry => entry.speed >= 0).sort((a, b) => a.speed - b.speed)[0] || entries[0];
+        if (fastest) selectSourceEntry(sourceEntryKey(fastest));
+    }
+}
+
+// 选中某个来源（绑稳定标识，测速重排后仍然指向同一个源）
+function selectSourceEntry(key) {
+    sourceModalState.selectedKey = key;
+    sourceModalState.entries.forEach(entry => {
+        if (!entry.card) return;
+        const active = sourceEntryKey(entry) === key;
+        entry.card.classList.toggle('ring-2', active);
+        entry.card.classList.toggle('ring-pink-500', active);
+    });
+    renderSourceModalDetail();
+}
+
+// 选中源的详情与播放入口
+function renderSourceModalDetail() {
+    const detail = document.getElementById('sourceModalDetail');
+    if (!detail) return;
+
+    const entry = sourceModalState.entries.find(item => sourceEntryKey(item) === sourceModalState.selectedKey);
+    if (!entry) {
+        detail.innerHTML = '<div class="text-center py-4 text-gray-500 text-sm">选择一个来源</div>';
+        return;
+    }
+
+    detail.innerHTML = `
+        <div class="flex items-start gap-3 p-3 bg-[#1a1a1a] rounded-lg">
+            <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt=""
+                 class="w-16 aspect-[2/3] object-cover rounded shrink-0">
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-semibold text-white truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
+                <div class="mt-1 text-xs text-gray-400">
+                    ${entry.speed >= 0 ? `速度 ${entry.speed}ms` : `速度：${escapeText(entry.error || '不可用')}`}
+                    ${entry.episodes ? ` · ${entry.episodes} 集` : ''}
+                </div>
+                <button id="sourceModalPlayBtn" class="mt-2 px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm">
+                    播放此源
+                </button>
+            </div>
+        </div>`;
+
+    const img = detail.querySelector('img');
+    if (img) {
+        img.addEventListener('error', () => {
+            img.onerror = null;
+            img.src = LATEST_PLACEHOLDER_IMAGE;
+            img.classList.add('object-contain');
+        });
+    }
+    const playBtn = document.getElementById('sourceModalPlayBtn');
+    if (playBtn) playBtn.addEventListener('click', () => playFromSourceModal(entry));
+}
+
+// 选中源后走现有的播放流程（详情 + 剧集在 app.js 的 showDetails 里，不另写一套）
+function playFromSourceModal(entry) {
+    closeSourceModal();
+    if (typeof showDetails === 'function') {
+        showDetails(entry.vodId, entry.name, entry.sourceCode);
+    }
+}
+
+// 弹窗基础交互：点遮罩关闭、Esc 关闭（只绑一次）
+function initSourceModal() {
+    const modal = document.getElementById('sourceModal');
+    if (!modal) return;
+
+    modal.addEventListener('click', event => {
+        if (event.target === modal) closeSourceModal();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeSourceModal();
+    });
+}
+document.addEventListener('DOMContentLoaded', initSourceModal);
 
 // 加载最近更新数据并渲染标签与卡片
 async function loadLatestUpdates() {
@@ -1055,6 +1365,8 @@ async function loadLatestUpdates() {
 
         const items = Array.isArray(data.list) ? data.list : [];
         latestItems = typeof applyYellowFilter === 'function' ? applyYellowFilter(items) : items;
+        // 按「片名+年份」聚合成组，只留 2 个及以上源都有的片，源多的排前面
+        latestGroups = buildLatestGroups(latestItems);
 
         // 刷新后若原分类已不存在，回到「全部」
         if (latestCategory !== LATEST_ALL_CATEGORY && !getLatestCategories().includes(latestCategory)) {
@@ -1062,7 +1374,7 @@ async function loadLatestUpdates() {
         }
 
         renderLatestTags();
-        renderLatestCards(filterLatestItems());
+        renderLatestCards(filterLatestGroups());
     } catch (error) {
         console.error('最近更新获取失败:', error);
         if (container) {

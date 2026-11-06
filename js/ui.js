@@ -41,6 +41,28 @@ function buildSourceRows(items) {
     }).join('');
 }
 
+// 格式化速度显示（播放器页的「切换资源」与首页的多源弹窗共用同一套角标）
+function formatSpeedDisplay(speedResult) {
+    if (speedResult.speed === -1) {
+        return `<span class="speed-indicator error">❌ ${speedResult.error}</span>`;
+    }
+
+    const speed = speedResult.speed;
+    let className = 'speed-indicator good';
+    let icon = '🟢';
+
+    if (speed > 2000) {
+        className = 'speed-indicator poor';
+        icon = '🔴';
+    } else if (speed > 1000) {
+        className = 'speed-indicator medium';
+        icon = '🟡';
+    }
+
+    const note = speedResult.note ? ` (${speedResult.note})` : '';
+    return `<span class="${className}">${icon} ${speed}ms${note}</span>`;
+}
+
 // UI相关函数
 function toggleSettings(e) {
     // 强化的密码保护校验 - 防止绕过

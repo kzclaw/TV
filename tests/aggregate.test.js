@@ -135,4 +135,22 @@ const item = (name, year, source, id, extra) => Object.assign({
     assert.equal(groups[0].items.length, 1);
 }
 
+// 11) sourceCount：组内来源数（同一源的重复条目只算一次）
+{
+    const groups = aggregateResults([
+        item('庆余年', '2019', 'ruyi', '1'),
+        item('庆余年', '2019', 'zuid', '2'),
+        item('庆余年', '2019', 'ruyi', '3')   // 同一源的重复条目
+    ]);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].items.length, 3, '重复条目仍在组内');
+    assert.equal(groups[0].sourceCount, 2, '来源数按不同源算，重复条目只算一次');
+}
+
+// 12) sourceCount：单源组为 1
+{
+    const groups = aggregateResults([item('唯一的片', '2020', 'ruyi', '1')]);
+    assert.equal(groups[0].sourceCount, 1);
+}
+
 console.log('aggregate.test.js: 全部断言通过 ✓');

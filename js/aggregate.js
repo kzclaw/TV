@@ -115,6 +115,15 @@ function vodYearOf(item) {
     return item && item.vod_year ? String(item.vod_year).trim() : '';
 }
 
+// 组内来源数：同一源同一片名只算一次（同一源的列表里偶尔会出现重复条目）
+function countGroupSources(items) {
+    const sources = new Set();
+    (items || []).forEach(item => {
+        if (item && item.source_code) sources.add(item.source_code);
+    });
+    return sources.size;
+}
+
 // 组内取第一个有的年份/分类/封面
 function buildAggregatedGroup(name, year, items) {
     const firstOf = field => {
@@ -131,6 +140,7 @@ function buildAggregatedGroup(name, year, items) {
         typeName: firstOf('type_name'),
         pic: firstOf('vod_pic'),
         remarks: inferGroupRemarks(items.map(item => (item && item.vod_remarks) || undefined)),
+        sourceCount: countGroupSources(items),
         items
     };
 }
