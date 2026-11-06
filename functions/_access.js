@@ -132,9 +132,11 @@ async function fetchIdpName(payload, token) {
     try {
         // 必须带超时：get-identity 是外部端点，挂住会拖死整页首屏。
         // 取不到就降级到 email，不影响页面。
+        // cookie 名两种都带上：官方文档写 CF_Authorization，浏览器里实际是
+        // CF_Authorization_<aud> —— 两种都塞上，省得猜错就丢掉显示名。
         const res = await fetch(IDENTITY_URL, {
-            headers: { cookie: `CF_Authorization=${token}` },
-            signal: AbortSignal.timeout(3000)
+            headers: { cookie: `CF_Authorization=${token}; CF_Authorization_${ACCESS_AUD}=${token}` },
+            signal: AbortSignal.timeout(1500)
         });
         if (res.ok) {
             const data = await res.json();
