@@ -1,5 +1,9 @@
 // 页面加载后显示弹窗脚本
 document.addEventListener('DOMContentLoaded', function() {
+    // Cloudflare Access 身份：由服务端验签 JWT 后注入 window.__ENV__.ACCESS_NAME
+    // 没有通过 Access（或验签不过）就是空字符串 —— 此时不显示任何欢迎词
+    const accessName = (window.__ENV__ && window.__ENV__.ACCESS_NAME) || '';
+
     // 弹窗显示脚本
     // 检查用户是否已经看过声明
     const hasSeenDisclaimer = localStorage.getItem('hasSeenDisclaimer');
@@ -7,6 +11,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!hasSeenDisclaimer) {
         // 显示弹窗
         const disclaimerModal = document.getElementById('disclaimerModal');
+
+        // 使用声明里加上欢迎词
+        if (accessName) {
+            const welcome = document.createElement('p');
+            welcome.className = 'text-center text-xl font-semibold text-blue-400 mb-4';
+            welcome.textContent = `欢迎回来，${accessName}`;
+            const body = disclaimerModal.querySelector('.text-gray-300');
+            if (body) body.insertBefore(welcome, body.firstChild);
+        }
+
         disclaimerModal.style.display = 'flex';
         
         // 添加接受按钮事件
@@ -16,6 +30,13 @@ document.addEventListener('DOMContentLoaded', function() {
             // 隐藏弹窗
             disclaimerModal.style.display = 'none';
         });
+    }
+
+    // 页面常驻欢迎标识（已经看过声明的老用户也能看到自己是谁）
+    const welcomeLine = document.getElementById('welcomeLine');
+    if (welcomeLine && accessName) {
+        welcomeLine.textContent = `欢迎回来，${accessName}`;
+        welcomeLine.classList.remove('hidden');
     }
 
     // URL搜索参数处理脚本
