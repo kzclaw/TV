@@ -1,8 +1,11 @@
 // ==== 源健康（熔断）====
-// 借鉴上游：连续失败的源先跳过一段时间，避免每次搜索都白等超时
-const SOURCE_HEALTH_KEY = 'kzTvSourceHealthV1'; // 带版本前缀，避免与旧缓存冲突
-const SOURCE_HEALTH_FAIL_LIMIT = 2;            // 连续失败次数达到该值即跳过
-const SOURCE_HEALTH_SKIP_MS = 30 * 60 * 1000;  // 跳过时长 30 分钟
+// 借鉴上游 src/lib/store.ts 的阶梯：连续失败到阈值就停用，停用时长按次数递增
+// 30 分钟 → 24 小时 → 长期停用；成功一次降一级（不是直接清零，偶发抽风的源能自己降回来）。
+// 不改用户勾选状态：是否跳过由调用方按 isSourceSkipped 过滤。
+const SOURCE_HEALTH_KEY = 'kzTvSourceHealthV2'; // 带版本前缀，避免与旧缓存冲突
+const SOURCE_HEALTH_FAIL_LIMIT = 2;            // 连续失败次数达到该值即停用
+// 停用阶梯：第 1 次 30 分钟，第 2 次 24 小时，阶梯用尽 → 长期停用
+const SOURCE_DISABLE_LADDER = [30 * 60 * 1000, 24 * 60 * 60 * 1000];
 
 function getSourceHealthStore() {
     try {
@@ -20,25 +23,61 @@ function saveSourceHealthStore(store) {
     }
 }
 
-// 连续失败达到阈值且仍在跳过窗口内 → 该源暂时不发请求
+// 处于停用期或已长期停用 → 该源暂时不发请求
 function isSourceSkipped(sourceKey) {
     const record = getSourceHealthStore()[sourceKey];
-    if (!record || record.count < SOURCE_HEALTH_FAIL_LIMIT) return false;
-    return Date.now() - (record.lastFailAt || 0) < SOURCE_HEALTH_SKIP_MS;
+    if (!record) return false;
+    if (record.permanent) return true;
+    return (record.disabledUntil || 0) > Date.now();
 }
 
 function markSourceFailed(sourceKey) {
     const store = getSourceHealthStore();
-    const record = store[sourceKey] || { count: 0 };
-    store[sourceKey] = { count: (record.count || 0) + 1, lastFailAt: Date.now() };
+    const prev = store[sourceKey] || {};
+    const now = Date.now();
+    const failStreak = (prev.failStreak || 0) + 1;
+    const next = Object.assign({}, prev, { failStreak, lastFailAt: now });
+
+    if (failStreak >= SOURCE_HEALTH_FAIL_LIMIT) {
+        // 已在停用期内 → 保持原等级，不重复升级
+        const alreadyDisabled = next.permanent === true || (next.disabledUntil || 0) > now;
+        if (!alreadyDisabled) {
+            const level = (prev.disableCount || 0) + 1;
+            next.disableCount = level;
+            const ttl = SOURCE_DISABLE_LADDER[level - 1];
+            if (ttl === undefined) {
+                next.permanent = true;          // 阶梯用尽 → 长期停用
+                next.disabledUntil = 0;
+            } else {
+                next.disabledUntil = now + ttl;
+            }
+        }
+    }
+
+    store[sourceKey] = next;
     saveSourceHealthStore(store);
 }
 
-// 成功一次即清零
+// 成功一次即降一级（阶梯降一级，不是直接清零）
 function markSourceSucceeded(sourceKey) {
     const store = getSourceHealthStore();
+    const prev = store[sourceKey];
+    if (!prev) return;
+    store[sourceKey] = Object.assign({}, prev, {
+        failStreak: 0,
+        disableCount: Math.max(0, (prev.disableCount || 0) - 1),
+        disabledUntil: 0,
+        permanent: false,
+        lastOkAt: Date.now()
+    });
+    saveSourceHealthStore(store);
+}
+
+// 手动清掉某个源的熔断状态（长期停用后唯一的恢复入口）
+function clearSourceHealth(sourceKey) {
+    const store = getSourceHealthStore();
     if (!store[sourceKey]) return;
-    store[sourceKey] = { count: 0, lastFailAt: 0, lastOkAt: Date.now() };
+    delete store[sourceKey];
     saveSourceHealthStore(store);
 }
 
@@ -51,18 +90,9 @@ window.SourceHealth = {
     isSourceSkipped,
     markSourceFailed,
     markSourceSucceeded,
+    clearSourceHealth,
     getSkippedSources
 };
-
-// 解析 vod_time：兼容 "2026-11-05 18:22:07" 与 "2026-11-05"；无法解析返回 0（排序时排最后）
-function parseVodTime(value) {
-    if (!value || typeof value !== 'string') return 0;
-    const matched = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
-    if (!matched) return 0;
-    const [, year, month, day, hour, minute, second] = matched;
-    const time = new Date(+year, +month - 1, +day, +(hour || 0), +(minute || 0), +(second || 0)).getTime();
-    return Number.isFinite(time) ? time : 0;
-}
 
 // 按更新时间倒序（新的在前）；时间相同或无法解析时按名称、来源排序
 function compareByVodTime(a, b) {
@@ -485,93 +515,6 @@ async function handleSpecialSourceDetail(id, sourceCode, externalSignal) {
     }
 }
 
-// 处理聚合搜索
-async function handleAggregatedSearch(searchQuery) {
-    // 获取可用的API源列表（排除aggregated和custom）
-    const availableSources = Object.keys(API_SITES).filter(key => 
-        key !== 'aggregated' && key !== 'custom'
-    );
-    
-    if (availableSources.length === 0) {
-        throw new Error('没有可用的API源');
-    }
-    
-    // 创建所有API源的搜索请求
-    const searchPromises = availableSources.map(async (source) => {
-        // 连续失败的源在跳过窗口内不再发请求
-        if (isSourceSkipped(source)) {
-            console.info(`${source}源连续失败，暂时跳过`);
-            return [];
-        }
-
-        try {
-            const apiUrl = `${API_SITES[source].api}${API_CONFIG.search.path}${encodeURIComponent(searchQuery)}`;
-            const data = await fetchSourceData(apiUrl, AGGREGATED_SEARCH_CONFIG.timeout);
-            markSourceSucceeded(source);
-
-            // 为搜索结果添加源信息
-            return data.list.map(item => ({
-                ...item,
-                source_name: API_SITES[source].name,
-                source_code: source
-            }));
-        } catch (error) {
-            console.warn(`${source}源搜索失败:`, error);
-            markSourceFailed(source);
-            return []; // 返回空数组表示该源搜索失败
-        }
-    });
-    
-    try {
-        // 并行执行所有搜索请求
-        const resultsArray = await Promise.all(searchPromises);
-        
-        // 合并所有结果
-        let allResults = [];
-        resultsArray.forEach(results => {
-            if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
-            }
-        });
-        
-        // 如果没有搜索结果，返回空结果
-        if (allResults.length === 0) {
-            return JSON.stringify({
-                code: 200,
-                list: [],
-                msg: '所有源均无搜索结果'
-            });
-        }
-        
-        // 去重（根据vod_id和source_code组合）
-        const uniqueResults = [];
-        const seen = new Set();
-        
-        allResults.forEach(item => {
-            const key = `${item.source_code}_${item.vod_id}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueResults.push(item);
-            }
-        });
-        
-        // 按更新时间倒序（新的在前），名称/来源仅作次要排序
-        uniqueResults.sort(compareByVodTime);
-        
-        return JSON.stringify({
-            code: 200,
-            list: uniqueResults,
-        });
-    } catch (error) {
-        console.error('聚合搜索处理错误:', error);
-        return JSON.stringify({
-            code: 400,
-            msg: '聚合搜索处理失败: ' + error.message,
-            list: []
-        });
-    }
-}
-
 // 采集单个源的最近更新：按 pg=1,2,3... 翻页，只留时间窗口（最近 3 天）内的条目。
 // 某一页里最旧的条目已早于窗口 → 该源到此为止（不用再翻后面的页）。
 // 同一批的页并发发出：上游单页要 0.5~3s，逐页串行会累加到十几秒，首页等不起。
@@ -659,111 +602,6 @@ async function handleLatestUpdates() {
         code: 200,
         list: allResults
     });
-}
-
-// 处理多个自定义API源的聚合搜索
-async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
-    // 解析自定义API列表
-    const apiUrls = customApiUrls.split(CUSTOM_API_CONFIG.separator)
-        .map(url => url.trim())
-        .filter(url => url.length > 0 && /^https?:\/\//.test(url))
-        .slice(0, CUSTOM_API_CONFIG.maxSources);
-    
-    if (apiUrls.length === 0) {
-        throw new Error('没有提供有效的自定义API地址');
-    }
-    
-    // 为每个API创建搜索请求
-    const searchPromises = apiUrls.map(async (apiUrl, index) => {
-        try {
-            const fullUrl = `${apiUrl}${API_CONFIG.search.path}${encodeURIComponent(searchQuery)}`;
-            
-            // 使用Promise.race添加超时处理
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error(`自定义API ${index+1} 搜索超时`)), 8000)
-            );
-            
-            // 添加鉴权参数到代理URL
-            const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(fullUrl)) :
-                PROXY_URL + encodeURIComponent(fullUrl);
-            
-            const fetchPromise = fetch(proxiedUrl, {
-                headers: API_CONFIG.search.headers
-            });
-            
-            const response = await Promise.race([fetchPromise, timeoutPromise]);
-            
-            if (!response.ok) {
-                throw new Error(`自定义API ${index+1} 请求失败: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            if (!data || !Array.isArray(data.list)) {
-                throw new Error(`自定义API ${index+1} 返回的数据格式无效`);
-            }
-            
-            // 为搜索结果添加源信息
-            const results = data.list.map(item => ({
-                ...item,
-                source_name: `${CUSTOM_API_CONFIG.namePrefix}${index+1}`,
-                source_code: 'custom',
-                api_url: apiUrl // 保存API URL以便详情获取
-            }));
-            
-            return results;
-        } catch (error) {
-            console.warn(`自定义API ${index+1} 搜索失败:`, error);
-            return []; // 返回空数组表示该源搜索失败
-        }
-    });
-    
-    try {
-        // 并行执行所有搜索请求
-        const resultsArray = await Promise.all(searchPromises);
-        
-        // 合并所有结果
-        let allResults = [];
-        resultsArray.forEach(results => {
-            if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
-            }
-        });
-        
-        // 如果没有搜索结果，返回空结果
-        if (allResults.length === 0) {
-            return JSON.stringify({
-                code: 200,
-                list: [],
-                msg: '所有自定义API源均无搜索结果'
-            });
-        }
-        
-        // 去重（根据vod_id和api_url组合）
-        const uniqueResults = [];
-        const seen = new Set();
-        
-        allResults.forEach(item => {
-            const key = `${item.api_url || ''}_${item.vod_id}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueResults.push(item);
-            }
-        });
-        
-        return JSON.stringify({
-            code: 200,
-            list: uniqueResults,
-        });
-    } catch (error) {
-        console.error('自定义API聚合搜索处理错误:', error);
-        return JSON.stringify({
-            code: 400,
-            msg: '自定义API聚合搜索处理失败: ' + error.message,
-            list: []
-        });
-    }
 }
 
 // 拦截API请求

@@ -1,5 +1,6 @@
 // 全局变量
-let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '["tyyszy","dyttzy", "bfzy", "ruyi"]'); // 默认选中资源
+// 默认选中资源：4 个都支持关键词搜索（原来的 tyyszy 是 listOnly，新用户实际只搜得到 3 个源）
+let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '["dyttzy","bfzy","ruyi","ffzy"]');
 let customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
 
 // 添加当前播放的集数索引
@@ -27,8 +28,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 设置默认API选择（如果是第一次加载）
     if (!localStorage.getItem('hasInitializedDefaults')) {
-        // 默认选中资源
-        selectedAPIs = ["tyyszy", "bfzy", "dyttzy", "ruyi"];
+        // 默认选中资源（都要支持关键词搜索）
+        selectedAPIs = ["dyttzy", "bfzy", "ruyi", "ffzy"];
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
 
         // 默认选中过滤开关
@@ -650,6 +651,7 @@ async function search() {
 
         // 从所有选中的API源搜索
         let allResults = [];
+        const failures = [];
         const searchPromises = selectedAPIs.map(apiId => 
             searchByAPIAndKeyWord(apiId, query)
         );
@@ -657,15 +659,14 @@ async function search() {
         // 等待所有搜索请求完成
         const resultsArray = await Promise.all(searchPromises);
 
-        // 合并所有结果
-        resultsArray.forEach(results => {
-            if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
+        // 合并所有结果；没响应的源单独收集起来（以前是静默消失，用户只以为「没搜到」）
+        resultsArray.forEach(outcome => {
+            if (!outcome) return;
+            if (Array.isArray(outcome.list) && outcome.list.length > 0) {
+                allResults = allResults.concat(outcome.list);
             }
+            if (outcome.failed) failures.push(outcome);
         });
-
-        // 对搜索结果进行排序：按更新时间倒序（新的在前）
-        allResults.sort(compareByVodTime);
 
         // 有搜索结果时，才更新URL
         if (allResults.length > 0) {
@@ -688,7 +689,8 @@ async function search() {
 
         // 显示结果区域并渲染（搜索与最近更新共用同一套渲染）
         showResultsArea();
-        renderResults(applyYellowFilter(allResults));
+        renderResults(applyYellowFilter(allResults), query);
+        showSearchFailures(failures);
 
         // 刷新源状态标记（连续失败的源会被跳过）
         updateSourceHealthUI();
@@ -728,11 +730,13 @@ function applyYellowFilter(items) {
 }
 
 // 渲染结果卡片（搜索与最近更新共用同一套渲染）
-function renderResults(items) {
+function renderResults(items, query) {
     const resultsDiv = document.getElementById('results');
 
-    // 同一部片在多个源的同名条目聚成一组，只出一张卡
-    const groups = aggregateResults(items);
+    // 同一部片在多个源的同名条目聚成一组，只出一张卡；
+    // 搜索时再按相关性分档：A 档（归一后完全相等）→ B 档（归一后前缀匹配，标「近似」）→ C 档不展示
+    const aggregated = aggregateResults(items);
+    const groups = query ? rankSearchGroups(aggregated, query) : aggregated;
 
     // 更新结果计数
     const searchResultsCount = document.getElementById('searchResultsCount');
@@ -801,6 +805,10 @@ function renderResults(items) {
                             <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${name}">${name}</h3>
                             
                             <div class="flex flex-wrap ${hasCover ? '' : 'justify-center'} gap-1 mb-2">
+                                ${group.tier === 'B' ? `
+                                <span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-yellow-500 text-yellow-300">
+                                          近似
+                                      </span>` : ''}
                                 ${typeName ?
                 `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-blue-500 text-blue-300">
                                           ${typeName}
@@ -859,6 +867,21 @@ function renderResults(items) {
     resultsDiv.innerHTML = safeResults;
 }
 
+// 搜索完成后提示没响应的源：一个源挂掉不该让整次搜索静默失败
+function showSearchFailures(failures) {
+    const inner = document.getElementById('resultsInner');
+    if (!inner) return;
+    const old = document.getElementById('searchFailures');
+    if (old) old.remove();
+    if (!failures || !failures.length) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'searchFailures';
+    banner.className = 'mb-3 text-xs text-yellow-500';
+    banner.textContent = `${failures.length} 个源没响应：${failures.map(f => f.sourceName).join('、')}`;
+    inner.insertBefore(banner, inner.firstChild);
+}
+
 // 把连续失败被跳过的源标记出来（复用设置面板里的源列表与状态显示）
 function updateSourceHealthUI() {
     const skipped = window.SourceHealth ? window.SourceHealth.getSkippedSources() : [];
@@ -869,9 +892,17 @@ function updateSourceHealthUI() {
 
         if (skipped.includes(sourceKey) && !marker) {
             const span = document.createElement('span');
-            span.className = 'source-skipped-mark text-yellow-500 ml-1';
+            span.className = 'source-skipped-mark text-yellow-500 ml-1 cursor-pointer';
             span.textContent = '已跳过';
-            span.title = '连续失败，暂不可用';
+            span.title = '连续失败，暂不可用（点击可解除）';
+            span.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (window.SourceHealth && window.SourceHealth.clearSourceHealth) {
+                    window.SourceHealth.clearSourceHealth(sourceKey);
+                    updateSourceHealthUI();
+                }
+            });
             label.appendChild(span);
         } else if (!skipped.includes(sourceKey) && marker) {
             marker.remove();

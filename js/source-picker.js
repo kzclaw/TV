@@ -46,7 +46,7 @@ function getSourcePickerOptions() {
         keys = null;
     }
     if (!Array.isArray(keys) || !keys.length) {
-        keys = ['tyyszy', 'bfzy', 'dyttzy', 'ruyi'];
+        keys = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
     }
     const sites = window.API_SITES || {};
     return keys.map(key => {
@@ -72,20 +72,39 @@ function sourcePickerApiParams(sourceKey) {
     return `&source=${encodeURIComponent(sourceKey)}`;
 }
 
-// 跨源搜同名候选：优先完全同名，否则取第一个（与播放器原「切换资源」一致）
+// 跨源搜同名候选，两档：
+//   A 档 = 归一后完全相等（「庆余年」）；B 档 = 归一后前缀匹配（「庆余年 第二季」「小偷 HD」「小偷[电影解说]」）
+// C 档（既不相等也不是前缀）不展示——以前只认原文完全相等，「小偷 HD」这类修饰名版本会让整个源消失；
+// B 档单列并标注「近似」，不与 A 档合并（避免把两部片子当成一部、播到错的内容）。
 async function collectSourcePickerCandidates(title, signal) {
     const options = getSourcePickerOptions();
+    const query = normalizeTitle(title);
     const found = await Promise.all(options.map(async opt => {
-        const list = await searchByAPIAndKeyWord(opt.key, title, signal);
+        const outcome = await searchByAPIAndKeyWord(opt.key, title, signal);
+        const list = outcome && outcome.list;
         if (!list || !list.length) return null;
-        let hit = list[0];
-        list.forEach(item => { if (item && item.vod_name === title) hit = item; });
+
+        let hit = null;
+        let tier = '';
+        list.forEach(item => {
+            const name = normalizeTitle(item && item.vod_name);
+            if (name === query) {
+                hit = item;
+                tier = 'A';
+            } else if (!tier && name.startsWith(query)) {
+                hit = item;
+                tier = 'B';
+            }
+        });
+        if (!hit) return null;
+
         return {
             sourceKey: opt.key,
             sourceName: opt.name,
             vodId: String(hit.vod_id || ''),
             name: hit.vod_name || title,
-            pic: hit.vod_pic || ''
+            pic: hit.vod_pic || '',
+            approx: tier === 'B'
         };
     }));
     return found.filter(Boolean);
@@ -159,7 +178,9 @@ function sourcePickerCardHtml(entry) {
                 </div>
             </div>
             <div class="mt-2">
-                <div class="text-xs font-medium text-gray-200 truncate">${escapeText(entry.name)}</div>
+                <div class="text-xs font-medium text-gray-200 truncate">
+                    ${escapeText(entry.name)}${entry.approx ? ' <span class="text-yellow-500">近似</span>' : ''}
+                </div>
                 <div class="text-[10px] text-gray-400 truncate">${escapeText(entry.sourceName)}</div>
                 <div class="text-[10px] text-gray-500 mt-1" data-source-note></div>
             </div>

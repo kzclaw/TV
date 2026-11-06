@@ -11,6 +11,64 @@ function normalizeTitle(s) {
     return String(s == null ? '' : s).toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 }
 
+// 解析 vod_time：兼容 "2026-11-05 18:22:07" 与 "2026-11-05"；无法解析返回 0（排序时排最后）
+function parseVodTime(value) {
+    if (!value || typeof value !== 'string') return 0;
+    const matched = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!matched) return 0;
+    const [, year, month, day, hour, minute, second] = matched;
+    const time = new Date(+year, +month - 1, +day, +(hour || 0), +(minute || 0), +(second || 0)).getTime();
+    return Number.isFinite(time) ? time : 0;
+}
+
+// ==== 搜索相关性三档 ====
+// A 档 = 归一后完全相等；B 档 = 归一后前缀匹配；C 档 = 都不匹配（不展示）。
+// 上游把「精确命中」排前面、「前缀命中」混在同一档；这里把前缀单列成 B 档、不与 A 档合并：
+// 实测 393 个真实片名里有 13 个「别的片名以它开头」（步步惊心 / 步步惊心泰国版、
+// 沧元图 / 沧元图3D动漫版、人气美食 / 人气美食2026……），
+// 合并会把两部片子当成一部，用户点进去播到的却是另一部的内容。
+const SEARCH_TIER_EXACT = 'A';
+const SEARCH_TIER_PREFIX = 'B';
+
+/** 归一后完全相等 → A 档；归一后前缀匹配 → B 档；其余（C 档）返回空串 */
+function searchRelevanceTier(name, query) {
+    const n = normalizeTitle(name);
+    const q = normalizeTitle(query);
+    if (!n || !q) return '';
+    if (n === q) return SEARCH_TIER_EXACT;
+    if (n.startsWith(q)) return SEARCH_TIER_PREFIX;
+    return '';
+}
+
+/** 组内最新的更新时间（毫秒时间戳；无法解析按 0） */
+function groupLatestTime(group) {
+    return (group.items || []).reduce((max, item) => {
+        const time = parseVodTime(item && item.vod_time);
+        return time > max ? time : max;
+    }, 0);
+}
+
+/**
+ * 搜索结果分档 + 排序：
+ * - C 档直接丢弃（上游特意不兜底取搜索第一条，否则搜到的会是别的影片）
+ * - A 档在前、B 档在后；同档内「源数多的在前」，再「vod_time 新的在前」
+ * 返回带 tier 标记的分组（B 档渲染时标「近似」，始终与 A 档分开）。
+ */
+function rankSearchGroups(groups, query) {
+    return (groups || [])
+        .map(group => {
+            const tier = searchRelevanceTier(group.name, query);
+            return tier ? { group, tier, time: groupLatestTime(group) } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            if (a.tier !== b.tier) return a.tier === SEARCH_TIER_EXACT ? -1 : 1;
+            if (a.group.sourceCount !== b.group.sourceCount) return b.group.sourceCount - a.group.sourceCount;
+            return b.time - a.time;
+        })
+        .map(entry => Object.assign({}, entry.group, { tier: entry.tier }));
+}
+
 // ==== 备注（vod_remarks）归一 ====
 // 该字段由各源自由填写，只归一「集数」与「完结状态」两类，
 // 其余（HD国语 / 正片 / 年份等）原样保留——它们不是集数信息，强行改写只会把内容丢掉。
@@ -197,6 +255,9 @@ function aggregateResults(list) {
 globalThis.Aggregation = {
     aggregateResults,
     normalizeTitle,
+    parseVodTime,
+    searchRelevanceTier,
+    rankSearchGroups,
     formatRemarks,
     compactRemarks,
     inferGroupRemarks

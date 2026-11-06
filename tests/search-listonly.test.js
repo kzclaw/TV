@@ -41,7 +41,7 @@ const sandbox = {
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
-for (const file of ['js/config.js', 'js/api.js', 'js/search.js']) {
+for (const file of ['js/config.js', 'js/aggregate.js', 'js/api.js', 'js/search.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
 }
 
