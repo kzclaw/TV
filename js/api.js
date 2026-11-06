@@ -1,11 +1,16 @@
 // ==== 源健康（熔断）====
 // 借鉴上游 src/lib/store.ts 的阶梯：连续失败到阈值就停用，停用时长按次数递增
-// 30 分钟 → 24 小时 → 长期停用；成功一次降一级（不是直接清零，偶发抽风的源能自己降回来）。
+// 30 分钟 → 24 小时 → 7 天。成功一次降一级（不是直接清零，偶发抽风的源能自己降回来）。
 // 不改用户勾选状态：是否跳过由调用方按 isSourceSkipped 过滤。
-const SOURCE_HEALTH_KEY = 'kzTvSourceHealthV2'; // 带版本前缀，避免与旧缓存冲突
+// V3：V2 的「长期停用」是永久的（permanent:true 永不过期），源站一恢复也回不来，
+// 只能逐个点黄色「已跳过」标记。换版本号直接作废旧状态 —— 网络抖动一次就可能把
+// 全部源钉死，不能让用户带着这份状态升级。
+const SOURCE_HEALTH_KEY = 'kzTvSourceHealthV3'; // 带版本前缀，避免与旧缓存冲突
 const SOURCE_HEALTH_FAIL_LIMIT = 2;            // 连续失败次数达到该值即停用
-// 停用阶梯：第 1 次 30 分钟，第 2 次 24 小时，阶梯用尽 → 长期停用
-const SOURCE_DISABLE_LADDER = [30 * 60 * 1000, 24 * 60 * 60 * 1000];
+// 停用阶梯：第 1 次 30 分钟，第 2 次 24 小时，第 3 次（及以后）7 天。
+// 阶梯不再「用尽即永久」：上游用「7 天未参与即作废惩罚」达到同一目的，
+// 这里直接给阶梯末级 7 天 —— 顶级也一定会有终点，不留「永远搜不到这个源」的死胡同。
+const SOURCE_DISABLE_LADDER = [30 * 60 * 1000, 24 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000];
 
 function getSourceHealthStore() {
     try {
@@ -27,7 +32,6 @@ function saveSourceHealthStore(store) {
 function isSourceSkipped(sourceKey) {
     const record = getSourceHealthStore()[sourceKey];
     if (!record) return false;
-    if (record.permanent) return true;
     return (record.disabledUntil || 0) > Date.now();
 }
 
@@ -35,22 +39,21 @@ function markSourceFailed(sourceKey) {
     const store = getSourceHealthStore();
     const prev = store[sourceKey] || {};
     const now = Date.now();
-    const failStreak = (prev.failStreak || 0) + 1;
+    // 停用期已过 → 上一次的连续失败已被「停用 + 恢复」打断，重新从 1 开始累计（与上游同口径）。
+    // 不这样算的话，一次网络抖动就能把计数攒到阶梯尽头，把源永久钉死。
+    const interrupted = (prev.disabledUntil || 0) > 0 && (prev.disabledUntil || 0) <= now;
+    const failStreak = interrupted ? 1 : (prev.failStreak || 0) + 1;
     const next = Object.assign({}, prev, { failStreak, lastFailAt: now });
+    if (interrupted) next.disabledUntil = 0;
 
     if (failStreak >= SOURCE_HEALTH_FAIL_LIMIT) {
         // 已在停用期内 → 保持原等级，不重复升级
-        const alreadyDisabled = next.permanent === true || (next.disabledUntil || 0) > now;
+        const alreadyDisabled = (next.disabledUntil || 0) > now;
         if (!alreadyDisabled) {
-            const level = (prev.disableCount || 0) + 1;
+            // 阶梯末级之后不再升级，一直按 7 天重试
+            const level = Math.min((prev.disableCount || 0) + 1, SOURCE_DISABLE_LADDER.length);
             next.disableCount = level;
-            const ttl = SOURCE_DISABLE_LADDER[level - 1];
-            if (ttl === undefined) {
-                next.permanent = true;          // 阶梯用尽 → 长期停用
-                next.disabledUntil = 0;
-            } else {
-                next.disabledUntil = now + ttl;
-            }
+            next.disabledUntil = now + SOURCE_DISABLE_LADDER[level - 1];
         }
     }
 
@@ -67,7 +70,6 @@ function markSourceSucceeded(sourceKey) {
         failStreak: 0,
         disableCount: Math.max(0, (prev.disableCount || 0) - 1),
         disabledUntil: 0,
-        permanent: false,
         lastOkAt: Date.now()
     });
     saveSourceHealthStore(store);
@@ -81,6 +83,13 @@ function clearSourceHealth(sourceKey) {
     saveSourceHealthStore(store);
 }
 
+// 一键清掉所有源的熔断状态。
+// 全部源都被停用时，逐个点黄色「已跳过」标记才能恢复 —— 24 个源点 24 次，
+// 等于没有恢复入口。DNS 一挂就是全站源一起中招，所以这个出口是必需的。
+function clearAllSourceHealth() {
+    localStorage.removeItem(SOURCE_HEALTH_KEY);
+}
+
 function getSkippedSources() {
     const store = getSourceHealthStore();
     return Object.keys(store).filter(key => isSourceSkipped(key));
@@ -91,6 +100,7 @@ window.SourceHealth = {
     markSourceFailed,
     markSourceSucceeded,
     clearSourceHealth,
+    clearAllSourceHealth,
     getSkippedSources
 };
 

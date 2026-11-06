@@ -924,9 +924,24 @@ function updateSourceHealthUI() {
 
     const statusEl = document.getElementById('siteStatus');
     if (statusEl) {
+        // 全部源被停用时给一个一键恢复的出口：DNS 抖动会让所有源一起中招，
+        // 逐个点黄色「已跳过」标记才能恢复等于没有恢复入口。
         statusEl.innerHTML = skipped.length
-            ? `<span class="text-yellow-500">●</span> 已跳过 ${skipped.length} 个源`
+            ? `<span class="text-yellow-500">●</span> 已跳过 ${skipped.length} 个源 ` +
+              `<button id="restoreAllSources" class="ml-1 underline hover:text-yellow-300" ` +
+              `title="清空所有源的熔断状态，立即恢复全部源">全部恢复</button>`
             : '';
+        const restoreBtn = document.getElementById('restoreAllSources');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (window.SourceHealth && window.SourceHealth.clearAllSourceHealth) {
+                    window.SourceHealth.clearAllSourceHealth();
+                    updateSourceHealthUI();
+                }
+            });
+        }
     }
 }
 

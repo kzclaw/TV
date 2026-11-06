@@ -35,11 +35,16 @@ const DOH_FAIL_TTL_MS = 10 * 1000;
 // DNS 记录类型号（DoH JSON API 的 Answer.type 用数字）
 const DNS_TYPE_A = 1;
 const DNS_TYPE_AAAA = 28;
-// 主端点用 Cloudflare DoH；备用端点只在主端点不可达时兜底（JSON 结构相同）
+// 主端点用 Cloudflare DoH；备用端点用 doh.pub（JSON 结构相同）
+// 两个端点并发查、谁先回用谁：串行查时主端点一旦挂住，备用端点永远轮不到，
+// 而 24 个源共用这一个 DNS 解析入口 → 主端点一卡就是「所有源同时超时」。
 const DOH_ENDPOINTS = [
     'https://cloudflare-dns.com/dns-query',
     'https://doh.pub/dns-query'
 ];
+// DoH 单次查询超时：外部端点不可达时 fetch 不会报错而是挂住，
+// 没有超时就会一路拖到平台上限，把整条代理链路拖死。
+const DOH_TIMEOUT_MS = 3000;
 // 模块级 DNS 缓存：host -> { at, ttl, ips, error }
 const dnsCache = new Map();
 
@@ -166,29 +171,33 @@ function checkProxyUrlSyntax(urlString) {
     return { ok: true, host };
 }
 
-/** DoH 查询：返回该类型的记录（IP 列表）；端点全部不可达时抛错，无记录返回空数组 */
+/** DoH 查询：返回该类型的记录（IP 列表）；端点全部不可达时抛错，无记录返回空数组
+ *  两个端点并发查、谁先回用谁；每个端点都有超时。
+ *  为什么不能串行：主端点挂住（不是报错，是黑洞）时串行要等它自己超时，
+ *  备用端点根本轮不上；而所有源共用这一个 DNS 入口，一个端点卡住就等于全站源超时。
+ */
 async function dohQuery(host, type) {
-    let lastError = null;
-    for (const endpoint of DOH_ENDPOINTS) {
-        try {
-            const response = await fetch(`${endpoint}?name=${encodeURIComponent(host)}&type=${type}`, {
-                headers: { 'Accept': 'application/dns-json' }
-            });
-            if (!response.ok) {
-                lastError = new Error(`DoH HTTP ${response.status}`);
-                continue;
-            }
-            const data = await response.json();
-            const answers = Array.isArray(data && data.Answer) ? data.Answer : [];
-            return answers
-                .filter(answer => answer && answer.type === type && typeof answer.data === 'string')
-                .map(answer => answer.data);
-        } catch (error) {
-            lastError = error;
-        }
+    const attempts = DOH_ENDPOINTS.map(async endpoint => {
+        const response = await fetch(`${endpoint}?name=${encodeURIComponent(host)}&type=${type}`, {
+            headers: { 'Accept': 'application/dns-json' },
+            signal: AbortSignal.timeout(DOH_TIMEOUT_MS)
+        });
+        if (!response.ok) throw new Error(`DoH HTTP ${response.status}`);
+        const data = await response.json();
+        const answers = Array.isArray(data && data.Answer) ? data.Answer : [];
+        return answers
+            .filter(answer => answer && answer.type === type && typeof answer.data === 'string')
+            .map(answer => answer.data);
+    });
+
+    // 第一个成功的端点即结果（与旧版「先答的端点就用它的」口径一致），不等另一个；
+    // 两个端点都失败才抛错。
+    try {
+        return await Promise.any(attempts);
+    } catch (e) {
+        const reasons = e && e.errors ? e.errors.map(r => r && r.message).filter(Boolean) : [];
+        throw new Error(reasons[0] || 'DoH 端点全部不可用');
     }
-    if (lastError) throw lastError;
-    return [];
 }
 
 /** 解析主机名（DoH），结果进模块级缓存（成功 60 秒 / 失败 10 秒） */
