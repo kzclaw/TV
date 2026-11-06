@@ -76,9 +76,11 @@ function compareByVodTime(a, b) {
 }
 
 // 采集源请求：统一走站点代理 + 超时控制；失败抛异常，便于统计熔断
-async function fetchSourceData(apiUrl, timeoutMs) {
+// externalSignal：外部取消信号（选源弹窗关闭时中止在途请求）
+async function fetchSourceData(apiUrl, timeoutMs, externalSignal) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    linkAbortSignal(externalSignal, controller);
 
     try {
         // 添加鉴权参数到代理URL
@@ -989,10 +991,19 @@ function createLatestCard(group) {
     const picValue = multi ? group.pic : (latest && latest.vod_pic);
     const pic = picValue ? String(picValue) : '';
 
-    // 单源：点击填标题并搜索；多源：点击打开多源弹窗（测速 + 选源）
+    // 单源：点击填标题并搜索；多源：点击打开共用选源弹窗（跨源现搜 + 测速 + 选源）
     const activate = () => {
         if (multi) {
-            openSourceModal(group);
+            if (typeof openSourcePicker !== 'function') return;
+            openSourcePicker({
+                title: group.name || title,
+                // 选中后走现有的详情/播放流程（app.js 的 showDetails）
+                onPick: entry => {
+                    if (typeof showDetails === 'function') {
+                        showDetails(entry.vodId, entry.name, entry.sourceKey);
+                    }
+                }
+            });
         } else {
             fillAndSearchWithLatest(title);
         }
@@ -1063,282 +1074,6 @@ function fillAndSearchWithLatest(title) {
     }
 }
 
-// ==== 多源选择弹窗 ====
-// 最近更新的卡片点开：列出该片的各来源 → 并发测速（用各源详情接口的耗时当速度指标）
-// → 按速度从快到慢排 → 选中一个源后走现有的播放流程。
-// 样式与交互照播放器页的「切换资源」模块（封面卡 + 右上角速度角标 + 选中源详情）。
-const sourceModalState = {
-    controller: null,       // 关闭弹窗时用它中止在途测速请求
-    entries: [],            // 各来源：测速结果 + DOM 引用
-    selectedKey: '',        // 选中态绑稳定标识（源key_片id），不用数组下标
-    bodyOverflow: ''
-};
-
-// 来源在弹窗里的稳定标识：测速结果会重排，绑下标会指错源
-function sourceEntryKey(entry) {
-    return `${entry.sourceCode}_${entry.vodId}`;
-}
-
-// 组内同一源只留一条（取更新时间最新的那条）
-function latestPerSource(items) {
-    const bySource = new Map();
-    (items || []).forEach(item => {
-        if (!item || !item.source_code) return;
-        const prev = bySource.get(item.source_code);
-        if (!prev || parseVodTime(item.vod_time) > parseVodTime(prev.vod_time)) {
-            bySource.set(item.source_code, item);
-        }
-    });
-    return Array.from(bySource.values());
-}
-
-// 单个来源的卡片（与播放器页「切换资源」的卡片同款）
-function sourceEntryHtml(entry) {
-    const key = sourceEntryKey(entry);
-    return `
-        <div class="relative cursor-pointer hover:scale-105 transition-transform" data-source-key="${escapeText(key)}">
-            <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 relative">
-                <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt="${escapeText(entry.name)}"
-                     loading="lazy" class="w-full h-full object-cover">
-                <div class="absolute top-1 right-1 speed-badge bg-black bg-opacity-75" data-source-badge>
-                    <span class="speed-indicator">测速中</span>
-                </div>
-            </div>
-            <div class="mt-2">
-                <div class="text-xs font-medium text-gray-200 truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
-                <div class="text-[10px] text-gray-500 truncate" data-source-note></div>
-            </div>
-        </div>`;
-}
-
-// 打开多源弹窗
-function openSourceModal(group) {
-    const modal = document.getElementById('sourceModal');
-    const content = document.getElementById('sourceModalContent');
-    const title = document.getElementById('sourceModalTitle');
-    if (!modal || !content) return;
-
-    closeSourceModal();
-
-    sourceModalState.entries = latestPerSource(group.items).map(item => ({
-        sourceCode: item.source_code,
-        sourceName: item.source_name || '',
-        vodId: String(item.vod_id || ''),
-        name: item.vod_name || group.name || '',
-        pic: item.vod_pic || '',
-        speed: -1,
-        error: '',
-        episodes: 0,
-        pending: true,
-        card: null,
-        badge: null,
-        note: null
-    }));
-    sourceModalState.selectedKey = '';
-
-    if (title) title.textContent = group.name || '';
-
-    content.innerHTML = `
-        <div id="sourceModalGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            ${sourceModalState.entries.map(sourceEntryHtml).join('')}
-        </div>
-        <div id="sourceModalDetail" class="mt-4"></div>`;
-
-    content.querySelectorAll('[data-source-key]').forEach(card => {
-        const key = card.getAttribute('data-source-key');
-        const entry = sourceModalState.entries.find(item => sourceEntryKey(item) === key);
-        if (!entry) return;
-        entry.card = card;
-        entry.badge = card.querySelector('[data-source-badge]');
-        entry.note = card.querySelector('[data-source-note]');
-        const img = card.querySelector('img');
-        if (img) {
-            img.addEventListener('error', () => {
-                img.onerror = null;
-                img.src = LATEST_PLACEHOLDER_IMAGE;
-                img.classList.add('object-contain');
-            });
-        }
-        card.addEventListener('click', () => selectSourceEntry(key));
-    });
-
-    modal.classList.remove('hidden');
-    sourceModalState.bodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    // 并发测速：各源详情接口的耗时当速度指标
-    // （上游用的是服务端 /api/quality；我们是静态站，改成前端直接请求各源的详情接口）
-    const controller = new AbortController();
-    sourceModalState.controller = controller;
-    Promise.all(sourceModalState.entries.map(entry => probeSourceEntry(entry, controller.signal)))
-        .then(() => finishSourceModal())
-        .catch(() => finishSourceModal());
-}
-
-// 关闭弹窗：中止在途测速请求（上游特意做了这条：否则关了弹窗请求还在跑）
-function closeSourceModal() {
-    const modal = document.getElementById('sourceModal');
-    if (sourceModalState.controller) {
-        sourceModalState.controller.abort();
-        sourceModalState.controller = null;
-    }
-    sourceModalState.entries = [];
-    sourceModalState.selectedKey = '';
-    if (modal) modal.classList.add('hidden');
-    document.body.style.overflow = sourceModalState.bodyOverflow;
-    sourceModalState.bodyOverflow = '';
-}
-
-// 测速一个来源：请求该源的详情接口，用耗时当速度指标
-async function probeSourceEntry(entry, signal) {
-    const started = performance.now();
-    try {
-        const response = await fetch(
-            `/api/detail?id=${encodeURIComponent(entry.vodId)}&source=${encodeURIComponent(entry.sourceCode)}&_t=${Date.now()}`,
-            { signal }
-        );
-        const data = await response.json();
-        if (signal.aborted) return;
-
-        if (!data || data.code !== 200 || !Array.isArray(data.episodes) || !data.episodes.length) {
-            entry.error = (data && data.msg) || '无可用播放资源';
-        } else {
-            entry.speed = Math.round(performance.now() - started);
-            entry.episodes = data.episodes.length;
-        }
-    } catch (error) {
-        if (signal.aborted) return;
-        entry.error = (error && error.name === 'AbortError') ? '已取消' : ((error && error.message) || '测速失败');
-    }
-    entry.pending = false;
-    refreshSourceEntry(entry);
-}
-
-// 回填一个来源的测速结果（只改角标，不重建卡片：重建会让封面重复请求）
-function refreshSourceEntry(entry) {
-    if (entry.badge) {
-        entry.badge.innerHTML = entry.pending
-            ? '<span class="speed-indicator">测速中</span>'
-            : formatSpeedDisplay(entry.speed >= 0
-                ? { speed: entry.speed }
-                : { speed: -1, error: '失败' });
-    }
-    if (entry.note) {
-        entry.note.textContent = entry.pending ? '' : (entry.speed >= 0
-            ? `${entry.episodes} 集`
-            : (entry.error || '测速失败'));
-        entry.note.title = entry.note.textContent;
-        entry.note.className = entry.pending || entry.speed >= 0
-            ? 'text-[10px] text-gray-500 truncate'
-            : 'text-[10px] text-red-400 truncate';
-    }
-}
-
-// 测速结束：按速度重排（失败的排最后），默认选中最快的可用源
-function finishSourceModal() {
-    if (!sourceModalState.controller) return;      // 弹窗已关闭
-
-    const entries = sourceModalState.entries;
-    entries.forEach(entry => {
-        entry.pending = false;
-        refreshSourceEntry(entry);
-    });
-
-    const grid = document.getElementById('sourceModalGrid');
-    if (grid) {
-        [...entries]
-            .sort((a, b) => {
-                const speedA = a.speed >= 0 ? a.speed : Number.MAX_SAFE_INTEGER;
-                const speedB = b.speed >= 0 ? b.speed : Number.MAX_SAFE_INTEGER;
-                return speedA - speedB;
-            })
-            .forEach(entry => { if (entry.card) grid.appendChild(entry.card); });
-    }
-
-    const summary = document.getElementById('sourceModalSummary');
-    if (summary) {
-        const ok = entries.filter(entry => entry.speed >= 0).length;
-        summary.textContent = `来源 ${entries.length} · 可用 ${ok}`;
-    }
-
-    if (!sourceModalState.selectedKey) {
-        const fastest = entries.filter(entry => entry.speed >= 0).sort((a, b) => a.speed - b.speed)[0] || entries[0];
-        if (fastest) selectSourceEntry(sourceEntryKey(fastest));
-    }
-}
-
-// 选中某个来源（绑稳定标识，测速重排后仍然指向同一个源）
-function selectSourceEntry(key) {
-    sourceModalState.selectedKey = key;
-    sourceModalState.entries.forEach(entry => {
-        if (!entry.card) return;
-        const active = sourceEntryKey(entry) === key;
-        entry.card.classList.toggle('ring-2', active);
-        entry.card.classList.toggle('ring-pink-500', active);
-    });
-    renderSourceModalDetail();
-}
-
-// 选中源的详情与播放入口
-function renderSourceModalDetail() {
-    const detail = document.getElementById('sourceModalDetail');
-    if (!detail) return;
-
-    const entry = sourceModalState.entries.find(item => sourceEntryKey(item) === sourceModalState.selectedKey);
-    if (!entry) {
-        detail.innerHTML = '<div class="text-center py-4 text-gray-500 text-sm">选择一个来源</div>';
-        return;
-    }
-
-    detail.innerHTML = `
-        <div class="flex items-start gap-3 p-3 bg-[#1a1a1a] rounded-lg">
-            <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt=""
-                 class="w-16 aspect-[2/3] object-cover rounded shrink-0">
-            <div class="flex-1 min-w-0">
-                <div class="text-sm font-semibold text-white truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
-                <div class="mt-1 text-xs text-gray-400">
-                    ${entry.speed >= 0 ? `速度 ${entry.speed}ms` : `速度：${escapeText(entry.error || '不可用')}`}
-                    ${entry.episodes ? ` · ${entry.episodes} 集` : ''}
-                </div>
-                <button id="sourceModalPlayBtn" class="mt-2 px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm">
-                    播放此源
-                </button>
-            </div>
-        </div>`;
-
-    const img = detail.querySelector('img');
-    if (img) {
-        img.addEventListener('error', () => {
-            img.onerror = null;
-            img.src = LATEST_PLACEHOLDER_IMAGE;
-            img.classList.add('object-contain');
-        });
-    }
-    const playBtn = document.getElementById('sourceModalPlayBtn');
-    if (playBtn) playBtn.addEventListener('click', () => playFromSourceModal(entry));
-}
-
-// 选中源后走现有的播放流程（详情 + 剧集在 app.js 的 showDetails 里，不另写一套）
-function playFromSourceModal(entry) {
-    closeSourceModal();
-    if (typeof showDetails === 'function') {
-        showDetails(entry.vodId, entry.name, entry.sourceCode);
-    }
-}
-
-// 弹窗基础交互：点遮罩关闭、Esc 关闭（只绑一次）
-function initSourceModal() {
-    const modal = document.getElementById('sourceModal');
-    if (!modal) return;
-
-    modal.addEventListener('click', event => {
-        if (event.target === modal) closeSourceModal();
-    });
-    document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') closeSourceModal();
-    });
-}
-document.addEventListener('DOMContentLoaded', initSourceModal);
 
 // 加载最近更新数据并渲染标签与卡片
 async function loadLatestUpdates() {

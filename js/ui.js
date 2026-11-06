@@ -203,6 +203,8 @@ function closeModal() {
     document.getElementById('modal').classList.add('hidden');
     // 清除 iframe 内容
     document.getElementById('modalContent').innerHTML = '';
+    // 选源弹窗可能还有在途的搜索/测速请求，一起中止
+    if (window.closeSourcePicker) window.closeSourcePicker();
 }
 
 // 获取搜索历史的增强版本 - 支持新旧格式

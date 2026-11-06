@@ -1,4 +1,4 @@
-async function searchByAPIAndKeyWord(apiId, query) {
+async function searchByAPIAndKeyWord(apiId, query, signal) {
     try {
         let apiUrl, apiName, apiBaseUrl;
         
@@ -33,8 +33,10 @@ async function searchByAPIAndKeyWord(apiId, query) {
         // 第一页结果
         let data;
         try {
-            data = await fetchSourceData(apiUrl, 15000);
+            data = await fetchSourceData(apiUrl, 15000, signal);
         } catch (error) {
+            // 弹窗关闭导致的中止不算源故障，不计入熔断
+            if (error && error.name === 'AbortError') return [];
             console.warn(`API ${apiId} 搜索失败:`, error);
             markSourceFailed(apiId);
             return [];
@@ -67,7 +69,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
                 // 创建获取额外页的Promise
                 const pagePromise = (async () => {
                     try {
-                        const pageData = await fetchSourceData(pageUrl, 15000);
+                        const pageData = await fetchSourceData(pageUrl, 15000, signal);
 
                         // 处理当前页结果
                         return pageData.list.map(item => ({
