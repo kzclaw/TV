@@ -99,7 +99,7 @@ function yearStringOf(item) {
     return '';
 }
 
-// 组的上映年份：组内 vod_year 抽不出 4 位时（如 "0"）退回条目自身的 vod_pubdate
+// 条目的上映年份（抽不到按 0 → 排最后）
 function parseYear(item) {
     const year = Number(yearStringOf(item));
     return year || 0;
