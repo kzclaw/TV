@@ -19,6 +19,268 @@ const MEDIA_FILE_EXTENSIONS = [
 const MEDIA_CONTENT_TYPES = ['video/', 'audio/', 'image/'];
 // --- 常量结束 ---
 
+// ==== SSRF 防护（Cloudflare Pages 等价实现）====
+// 上游（Node 版）靠 node:dns + undici Agent 做连接级防护，Edge runtime 两样都没有，
+// 这里换成 Pages 跑得动的等价物，判定口径与上游 ssrf.ts 保持一致：
+//   ① 协议白名单（只允许 http/https）、禁止 userinfo、端口白名单（80/443）
+//   ② 字面量 IP：回环/私有/链路本地（含 169.254.169.254）/0.0.0.0 及其 IPv6 等价段
+//   ③ 域名：DoH 解析（Edge 没有 node:dns），命中私网即拒；结果按 host 缓存，避免每个请求多一次外网往返
+//   ④ 重定向：redirect: 'manual'，每一跳重新校验，最多跟 3 跳
+// DoH 解析失败时保守拒绝：宁可少一个源，也不能把 Pages Function 变成内网探测跳板。
+
+const ALLOWED_PROXY_PORTS = ['80', '443'];
+const MAX_REDIRECT_HOPS = 3;
+const DOH_TTL_MS = 60 * 1000;
+const DOH_FAIL_TTL_MS = 10 * 1000;
+// DNS 记录类型号（DoH JSON API 的 Answer.type 用数字）
+const DNS_TYPE_A = 1;
+const DNS_TYPE_AAAA = 28;
+// 主端点用 Cloudflare DoH；备用端点只在主端点不可达时兜底（JSON 结构相同）
+const DOH_ENDPOINTS = [
+    'https://cloudflare-dns.com/dns-query',
+    'https://doh.pub/dns-query'
+];
+// 模块级 DNS 缓存：host -> { at, ttl, ips, error }
+const dnsCache = new Map();
+
+/** 去掉 IPv6 字面量外层的方括号（"[::1]" → "::1"） */
+function stripBrackets(host) {
+    return String(host == null ? '' : host).trim().replace(/^\[+/, '').replace(/\]+$/, '');
+}
+
+/**
+ * IPv4 私有/保留网段：
+ * 0.0.0.0/8、127/8、10/8、172.16/12、192.168/16、169.254/16（含云元数据 169.254.169.254）、
+ * 100.64/10（CGNAT）、192.0.0/24（协议分配块）
+ */
+function isPrivateIPv4(ip) {
+    const parts = String(ip).split('.');
+    if (parts.length !== 4) return false;
+    const nums = parts.map(part => (part === '' ? NaN : Number(part)));
+    if (nums.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+    const [a, b, c] = nums;
+    if (a === 0) return true;                                   // 0.0.0.0/8
+    if (a === 127) return true;                                 // 回环
+    if (a === 10) return true;                                  // 私有
+    if (a === 172 && b >= 16 && b <= 31) return true;           // 172.16/12
+    if (a === 192 && b === 168) return true;                    // 192.168/16
+    if (a === 169 && b === 254) return true;                    // 链路本地（含元数据地址）
+    if (a === 100 && b >= 64 && b <= 127) return true;           // CGNAT
+    if (a === 192 && b === 0 && c === 0) return true;            // 192.0.0/24
+    return false;
+}
+
+/** IPv6 字面量 → 8 个 16 位分组；不是合法 IPv6 返回 null */
+function parseIPv6Groups(ip) {
+    let value = stripBrackets(ip).toLowerCase();
+    const zone = value.indexOf('%');
+    if (zone >= 0) value = value.slice(0, zone);
+    if (!value.includes(':')) return null;
+
+    // 末尾内嵌 IPv4（::ffff:192.168.1.1）→ 折成两个十六进制分组
+    const embedded = /^(.*:)((?:\d{1,3}\.){3}\d{1,3})$/.exec(value);
+    if (embedded) {
+        const octets = embedded[2].split('.').map(Number);
+        if (octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+        const hi = (octets[0] << 8) | octets[1];
+        const lo = (octets[2] << 8) | octets[3];
+        value = embedded[1] + hi.toString(16) + ':' + lo.toString(16);
+    }
+
+    const halves = value.split('::');
+    if (halves.length > 2) return null;
+    const head = halves[0] ? halves[0].split(':') : [];
+    const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+    let groups;
+    if (halves.length === 2) {
+        const fill = 8 - head.length - tail.length;
+        if (fill < 0) return null;
+        groups = head.concat(new Array(fill).fill('0'), tail);
+    } else {
+        groups = head;
+    }
+    if (groups.length !== 8) return null;
+    const parsed = groups.map(group => (/^[0-9a-f]{1,4}$/.test(group) ? parseInt(group, 16) : NaN));
+    return parsed.some(Number.isNaN) ? null : parsed;
+}
+
+/** IPv6 私有/保留网段：::1 回环、:: 未指定、fc00::/7、fe80::/10、IPv4 映射/兼容、NAT64 */
+function isPrivateIPv6(ip) {
+    const groups = parseIPv6Groups(ip);
+    if (!groups) return false;
+    const zeros = (from, to) => {
+        for (let i = from; i < to; i++) if (groups[i] !== 0) return false;
+        return true;
+    };
+    const v4From = (hi, lo) => isPrivateIPv4([hi >> 8, hi & 255, lo >> 8, lo & 255].join('.'));
+    if (zeros(0, 7)) return true;                                                    // :: 与 ::1
+    if (zeros(0, 5) && (groups[5] === 0xffff || groups[5] === 0)) return v4From(groups[6], groups[7]);
+    if (groups[0] === 0x0064 && groups[1] === 0xff9b && zeros(2, 6)) return v4From(groups[6], groups[7]);
+    if ((groups[0] & 0xfe00) === 0xfc00) return true;                                // fc00::/7
+    if ((groups[0] & 0xffc0) === 0xfe80) return true;                                // fe80::/10
+    return false;
+}
+
+/** 是否私有/保留地址（IPv4 + IPv6） */
+function isPrivateIP(ip) {
+    const value = stripBrackets(ip);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return isPrivateIPv4(value);
+    if (value.includes(':')) return isPrivateIPv6(value);
+    return false;
+}
+
+/** host 是否本身就是 IP 字面量 */
+function isLiteralIP(host) {
+    const value = stripBrackets(host);
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(value) || value.includes(':');
+}
+
+/**
+ * URL 字面量校验（纯函数，无网络）：协议白名单 + 禁止 userinfo + 端口白名单 + 字面量 IP 黑名单。
+ * 返回 { ok: true, host } 或 { ok: false, reason }。
+ */
+function checkProxyUrlSyntax(urlString) {
+    let parsed;
+    try {
+        parsed = new URL(urlString);
+    } catch (e) {
+        return { ok: false, reason: '无效的 URL' };
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, reason: '只允许 http/https 协议' };
+    }
+    if (parsed.username || parsed.password) {
+        return { ok: false, reason: 'URL 不允许携带用户名或密码' };
+    }
+    if (parsed.port && !ALLOWED_PROXY_PORTS.includes(parsed.port)) {
+        return { ok: false, reason: '只允许 80/443 端口' };
+    }
+    const host = stripBrackets(parsed.hostname).toLowerCase();
+    if (!host) return { ok: false, reason: '缺少主机名' };
+    if (host === 'localhost' || host.endsWith('.localhost')) {
+        return { ok: false, reason: '不允许的主机名' };
+    }
+    if (isLiteralIP(host) && isPrivateIP(host)) {
+        return { ok: false, reason: '目标地址属于私有/保留网络' };
+    }
+    return { ok: true, host };
+}
+
+/** DoH 查询：返回该类型的记录（IP 列表）；端点全部不可达时抛错，无记录返回空数组 */
+async function dohQuery(host, type) {
+    let lastError = null;
+    for (const endpoint of DOH_ENDPOINTS) {
+        try {
+            const response = await fetch(`${endpoint}?name=${encodeURIComponent(host)}&type=${type}`, {
+                headers: { 'Accept': 'application/dns-json' }
+            });
+            if (!response.ok) {
+                lastError = new Error(`DoH HTTP ${response.status}`);
+                continue;
+            }
+            const data = await response.json();
+            const answers = Array.isArray(data && data.Answer) ? data.Answer : [];
+            return answers
+                .filter(answer => answer && answer.type === type && typeof answer.data === 'string')
+                .map(answer => answer.data);
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    if (lastError) throw lastError;
+    return [];
+}
+
+/** 解析主机名（DoH），结果进模块级缓存（成功 60 秒 / 失败 10 秒） */
+async function resolveHostAddresses(host) {
+    const now = Date.now();
+    const cached = dnsCache.get(host);
+    if (cached && now - cached.at < cached.ttl) {
+        if (cached.error) throw new Error(cached.error);
+        return cached.ips;
+    }
+
+    let ips = [];
+    let error = '';
+    try {
+        const [v4, v6] = await Promise.all([dohQuery(host, DNS_TYPE_A), dohQuery(host, DNS_TYPE_AAAA)]);
+        ips = v4.concat(v6);
+        if (!ips.length) error = 'DNS 没有解析记录';
+    } catch (e) {
+        error = 'DNS 解析失败';
+    }
+    dnsCache.set(host, { at: now, ttl: error ? DOH_FAIL_TTL_MS : DOH_TTL_MS, ips, error });
+    if (error) throw new Error(error);
+    return ips;
+}
+
+/**
+ * 出网前的统一校验：字面量规则 + DoH 解析结果。
+ * DoH 解析失败时保守拒绝（不放过未知地址）。
+ */
+async function checkOutboundTarget(urlString) {
+    const syntax = checkProxyUrlSyntax(urlString);
+    if (!syntax.ok) return syntax;
+    if (isLiteralIP(syntax.host)) return { ok: true };    // 公网 IP 字面量：无需解析
+    let ips;
+    try {
+        ips = await resolveHostAddresses(syntax.host);
+    } catch (e) {
+        return { ok: false, reason: `目标主机无法解析（${e.message}，保守拒绝）` };
+    }
+    for (const ip of ips) {
+        if (isPrivateIP(ip)) {
+            return { ok: false, reason: `目标主机解析到私有/保留地址（${ip}）` };
+        }
+    }
+    return { ok: true };
+}
+
+/** SSRF 拦截：单独一类错误，便于回 403 而不是 500 */
+class SsrfBlockedError extends Error {
+    constructor(target, reason) {
+        super(reason);
+        this.name = 'SsrfBlockedError';
+        this.target = target;
+        this.reason = reason;
+    }
+}
+
+/** 带 SSRF 校验的取数：每一跳重定向都重新校验，最多跟 MAX_REDIRECT_HOPS 跳 */
+async function fetchWithSsrfGuard(targetUrl, headers) {
+    let current = targetUrl;
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+        const verdict = await checkOutboundTarget(current);
+        if (!verdict.ok) throw new SsrfBlockedError(current, verdict.reason);
+        const response = await fetch(current, { headers, redirect: 'manual' });
+        const location = (response.status >= 300 && response.status < 400)
+            ? response.headers.get('location')
+            : null;
+        if (!location) return response;
+        if (hop >= MAX_REDIRECT_HOPS) throw new SsrfBlockedError(current, '重定向跳数过多');
+        let next;
+        try {
+            next = new URL(location, current).toString();
+        } catch (e) {
+            throw new SsrfBlockedError(current, '重定向地址无效');
+        }
+        current = next;
+    }
+}
+
+/** JSON 响应（带 CORS 头） */
+function createJsonResponse(payload, status) {
+    return new Response(JSON.stringify(payload), {
+        status,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+            'Content-Type': 'application/json'
+        }
+    });
+}
+
 /**
  * sha256 十六进制哈希（代理鉴权用，结果与浏览器端 js/sha256.js 一致）
  */
@@ -282,8 +544,8 @@ export async function onRequest(context) {
         try {
             // 直接请求目标 URL
             logDebug(`开始直接请求: ${targetUrl}`);
-            // Cloudflare Functions 的 fetch 默认支持重定向
-            const response = await fetch(targetUrl, { headers, redirect: 'follow' });
+            // 出网前做 SSRF 校验（协议/端口/私网 IP/DoH 解析），重定向逐跳重新校验
+            const response = await fetchWithSsrfGuard(targetUrl, headers);
 
             if (!response.ok) {
                  const errorBody = await response.text().catch(() => '');
@@ -298,6 +560,7 @@ export async function onRequest(context) {
             return { bytes: new Uint8Array(buf), contentType, responseHeaders: response.headers, status: response.status };
 
         } catch (error) {
+             if (error && error.name === 'SsrfBlockedError') throw error;  // 不吞：交给上层回 403
              logDebug(`请求彻底失败: ${targetUrl}: ${error.message}`);
             // 抛出更详细的错误
             throw new Error(`请求目标URL失败 ${targetUrl}: ${error.message}`);
@@ -521,6 +784,18 @@ export async function onRequest(context) {
             return createResponse("无效的代理请求。路径应为 /proxy/<经过编码的URL>", 400);
         }
 
+        // SSRF 校验：协议/端口/userinfo/私网 IP/DoH 解析，全部在出网之前
+        const ssrfVerdict = await checkOutboundTarget(targetUrl);
+        if (!ssrfVerdict.ok) {
+            logDebug(`SSRF 拦截: ${targetUrl} - ${ssrfVerdict.reason}`);
+            return createJsonResponse({
+                success: false,
+                error: '目标地址被安全策略拒绝',
+                target: targetUrl,
+                reason: ssrfVerdict.reason
+            }, 403);
+        }
+
         logDebug(`收到代理请求: ${targetUrl}`);
 
         // --- 缓存检查 (KV) ---
@@ -596,6 +871,15 @@ export async function onRequest(context) {
         }
 
     } catch (error) {
+        if (error && error.name === 'SsrfBlockedError') {
+            logDebug(`SSRF 拦截: ${error.target} - ${error.reason}`);
+            return createJsonResponse({
+                success: false,
+                error: '目标地址被安全策略拒绝',
+                target: error.target,
+                reason: error.reason
+            }, 403);
+        }
         logDebug(`处理代理请求时发生严重错误: ${error.message} \n ${error.stack}`);
         return createResponse(`代理处理错误: ${error.message}`, 500);
     }
@@ -614,3 +898,6 @@ export async function onOptions(context) {
         },
     });
 }
+
+// 导出判定用的纯函数，供 tests/proxy-ssrf.test.js 自检（不依赖网络）
+export { isPrivateIPv4, isPrivateIPv6, isPrivateIP, isLiteralIP, checkProxyUrlSyntax };
