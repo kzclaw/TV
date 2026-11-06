@@ -130,7 +130,12 @@ async function fetchIdpName(payload, token) {
 
     let name = null;
     try {
-        const res = await fetch(IDENTITY_URL, { headers: { cookie: `CF_Authorization=${token}` } });
+        // 必须带超时：get-identity 是外部端点，挂住会拖死整页首屏。
+        // 取不到就降级到 email，不影响页面。
+        const res = await fetch(IDENTITY_URL, {
+            headers: { cookie: `CF_Authorization=${token}` },
+            signal: AbortSignal.timeout(3000)
+        });
         if (res.ok) {
             const data = await res.json();
             const idp = data && typeof data.idp === 'object' ? data.idp : null;
