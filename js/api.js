@@ -614,7 +614,10 @@ async function handleLatestUpdates() {
         if (requestUrl.pathname.startsWith('/api/')) {
             if (window.isPasswordProtected && window.isPasswordVerified) {
                 if (window.isPasswordProtected() && !window.isPasswordVerified()) {
-                    return;
+                    return new Response(JSON.stringify({ code: 401, msg: '请先输入访问密码' }), {
+                        status: 401,
+                        headers: { 'Content-Type': 'application/json' },
+                    });
                 }
             }
             try {
@@ -916,6 +919,8 @@ function fillAndSearchWithLatest(title) {
 // 加载最近更新数据并渲染标签与卡片
 async function loadLatestUpdates() {
     if (latestLoading) return;
+    // 密码门未验证时请求会被拦截（拿不到数据），等验证通过后 initLatestUpdates() 会重新触发
+    if (window.isPasswordProtected && window.isPasswordProtected() && !window.isPasswordVerified()) return;
     latestLoading = true;
 
     const container = document.getElementById('latest-results');
