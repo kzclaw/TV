@@ -774,7 +774,7 @@ function renderResults(items, query) {
         // 单源沿用原字段；多源用组内的年份/分类/封面与统一后的备注
         const name = escapeText(multi ? group.name : (item.vod_name || ''));
         const typeName = escapeText(multi ? (group.typeName || '') : (item.type_name || ''));
-        const year = escapeText(multi ? (group.year || '') : (item.vod_year || ''));
+        const year = escapeText(group.year || '');
         const remarks = escapeText(multi ? (group.remarks || '') : (item.vod_remarks || ''));
         const pic = String((multi ? group.pic : item.vod_pic) || '');
 

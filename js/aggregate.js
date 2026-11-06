@@ -21,23 +21,94 @@ function parseVodTime(value) {
     return Number.isFinite(time) ? time : 0;
 }
 
-// ==== 搜索相关性三档 ====
-// A 档 = 归一后完全相等；B 档 = 归一后前缀匹配；C 档 = 都不匹配（不展示）。
-// 上游把「精确命中」排前面、「前缀命中」混在同一档；这里把前缀单列成 B 档、不与 A 档合并：
+// ==== 搜索相关性两档 ====
+// A 档 = 归一后完全相等；B 档 = 同系列（季数别名 / 前缀扩展 / 公共前缀）；其余不展示。
+// 上游把「精确命中」排前面、「前缀命中」混在同一档；这里把同系列单列成 B 档、不与 A 档合并：
 // 实测 393 个真实片名里有 13 个「别的片名以它开头」（步步惊心 / 步步惊心泰国版、
 // 沧元图 / 沧元图3D动漫版、人气美食 / 人气美食2026……），
 // 合并会把两部片子当成一部，用户点进去播到的却是另一部的内容。
 const SEARCH_TIER_EXACT = 'A';
-const SEARCH_TIER_PREFIX = 'B';
+const SEARCH_TIER_SAME_SERIES = 'B';
 
-/** 归一后完全相等 → A 档；归一后前缀匹配 → B 档；其余（C 档）返回空串 */
+// 季数后缀解析（移植上游 cms-parser.ts 的 parseSeasonSuffix）：
+// 查询侧允许「庆余年2」这种无空格写法，标题侧要求有空格——
+// 「电影2」是片名自带数字，不是第二季。allowAnnotations 放开「第二季 花絮」这类尾注。
+function parseSeasonSuffix(title, allowAnnotations = false, bareNeedsSpace = true) {
+    const explicitPattern = allowAnnotations
+        ? /^(.*?)\s*第\s*([1-9]\d?|[一二两三四五六七八九十]{1,3})\s*季.*$/u
+        : /^(.*?)\s*第\s*([1-9]\d?|[一二两三四五六七八九十]{1,3})\s*季$/u;
+    const explicit = title.trim().match(explicitPattern);
+    const bare = title.trim().match(bareNeedsSpace ? /^(.*?)\s+([1-9]\d?)$/u : /^(.*?)\s*([1-9]\d?)$/u);
+    const match = explicit || bare;
+    if (!match || !normalizeTitle(match[1])) return undefined;
+    const value = match[2];
+    const digits = '零一二三四五六七八九';
+    let season = Number(value);
+    if (!Number.isFinite(season)) {
+        const chinese = value.replace('两', '二');
+        if (/^[一二三四五六七八九]$/.test(chinese)) {
+            season = digits.indexOf(chinese);
+        } else if (/^[一二三四五六七八九]?十[一二三四五六七八九]?$/.test(chinese)) {
+            const [tens, units] = chinese.split('十');
+            season = (tens ? digits.indexOf(tens) : 1) * 10 + (units ? digits.indexOf(units) : 0);
+        }
+    }
+    if (!Number.isFinite(season)) return undefined;
+    return { base: match[1], season, explicit: Boolean(explicit) };
+}
+
+// 两段归一标题的公共前缀长度（按字符计）
+function commonPrefixLen(a, b) {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return i;
+}
+
+/**
+ * 归一后完全相等 → A 档；同系列 → B 档；其余返回空串（不展示）。
+ * 「同系列」三种形态：
+ *   1) 季数别名：查询「庆余年2」↔ 标题「庆余年第二季」（季数不同则判为不相关）
+ *   2) 前缀扩展：标题以查询开头（查询「庆余年」↔ 标题「庆余年之少年风流」）
+ *   3) 公共前缀 ≥4 字：查询「哈利波特4火焰杯」↔ 标题「哈利·波特与火焰杯」（同系列不同写法）
+ */
 function searchRelevanceTier(name, query) {
     const n = normalizeTitle(name);
     const q = normalizeTitle(query);
     if (!n || !q) return '';
     if (n === q) return SEARCH_TIER_EXACT;
-    if (n.startsWith(q)) return SEARCH_TIER_PREFIX;
+
+    const querySeason = parseSeasonSuffix(query, false, false);
+    const titleSeason = parseSeasonSuffix(name, true);
+    if (querySeason && titleSeason) {
+        if (querySeason.season !== titleSeason.season) return '';
+        if (normalizeTitle(querySeason.base) === normalizeTitle(titleSeason.base)) return SEARCH_TIER_SAME_SERIES;
+    }
+    if (!querySeason && titleSeason && normalizeTitle(titleSeason.base) === q) return SEARCH_TIER_SAME_SERIES;
+    if (n.startsWith(q)) return SEARCH_TIER_SAME_SERIES;
+    if (commonPrefixLen(n, q) >= 4) return SEARCH_TIER_SAME_SERIES;
     return '';
+}
+
+// 上映年份：源站 vod_year 常带杂值（"0" / "2019–"），统一抽 4 位；
+// vod_year 抽不出时退回 vod_pubdate（实测内置源里这两者一致，自定义源未必）。
+function yearStringOf(item) {
+    for (const value of [item && item.vod_year, item && item.vod_pubdate]) {
+        const matched = String(value == null ? '' : value).match(/(19|20)\d{2}/);
+        if (matched) return matched[0];
+    }
+    return '';
+}
+
+// 组的上映年份：组内 vod_year 抽不出 4 位时（如 "0"）退回条目自身的 vod_pubdate
+function parseYear(item) {
+    const year = Number(yearStringOf(item));
+    return year || 0;
+}
+
+// 组的上映年份（组名已归一，抽不到按 0 → 排最后）
+function groupYear(group) {
+    const matched = String((group && group.year) || '').match(/(19|20)\d{2}/);
+    return matched ? Number(matched[0]) : 0;
 }
 
 /** 组内最新的更新时间（毫秒时间戳；无法解析按 0） */
@@ -50,19 +121,33 @@ function groupLatestTime(group) {
 
 /**
  * 搜索结果分档 + 排序：
- * - C 档直接丢弃（上游特意不兜底取搜索第一条，否则搜到的会是别的影片）
- * - A 档在前、B 档在后；同档内「源数多的在前」，再「vod_time 新的在前」
+ * - 不相关的结果直接丢弃（上游特意不兜底取搜索第一条，否则搜到的会是别的影片）
+ * - A 档在前、B 档在后
+ * - 同档内「与查询重合得多的在前」→ 再「上映年份早的在前」→ 再「源数多的在前」→ 再「vod_time 新的在前」
+ *   重合度用公共前缀长度衡量：搜「哈利波特4火焰杯」时「哈利波特4火焰杯(普通话版)」前缀 8 字、
+ *   「哈利·波特与魔法石」只有 4 字，前者必须排前面，否则用户搜具体某一部却被同系列老片压住。
+ *   搜「哈利波特」时所有命中前缀都是 4 字（= 查询全长），并列后落到年份序，
+ *   系列片按上映顺序排列（魔法石2001 → 密室2002 → 火焰杯2005 → 混血王子2009）。
  * 返回带 tier 标记的分组（B 档渲染时标「近似」，始终与 A 档分开）。
  */
 function rankSearchGroups(groups, query) {
+    const q = normalizeTitle(query);
     return (groups || [])
         .map(group => {
             const tier = searchRelevanceTier(group.name, query);
-            return tier ? { group, tier, time: groupLatestTime(group) } : null;
+            return tier ? {
+                group,
+                tier,
+                year: groupYear(group),
+                time: groupLatestTime(group),
+                specificity: commonPrefixLen(normalizeTitle(group.name), q)
+            } : null;
         })
         .filter(Boolean)
         .sort((a, b) => {
             if (a.tier !== b.tier) return a.tier === SEARCH_TIER_EXACT ? -1 : 1;
+            if (a.specificity !== b.specificity) return b.specificity - a.specificity;
+            if (a.year !== b.year) return (a.year || 9999) - (b.year || 9999);
             if (a.group.sourceCount !== b.group.sourceCount) return b.group.sourceCount - a.group.sourceCount;
             return b.time - a.time;
         })
@@ -168,9 +253,11 @@ function inferGroupRemarks(raws) {
 
 // ==== 分组 ====
 
-// 条目的年份：缺失/空白一律当作没有年份
+// 条目的年份：源站 vod_year 常带杂值（"0" / "2019–"），统一抽 4 位；抽不出退回 vod_pubdate。
+// 不归一会让同一部片因写法不同被拆成多张卡：实测「庆余年第一季」在 6 个源出现，
+// 其中 mdzy 写 "2019–"、其余写 "2019"，结果同一集出了两张卡。
 function vodYearOf(item) {
-    return item && item.vod_year ? String(item.vod_year).trim() : '';
+    return yearStringOf(item);
 }
 
 // 组内来源数：同一源同一片名只算一次（同一源的列表里偶尔会出现重复条目）
@@ -256,6 +343,8 @@ globalThis.Aggregation = {
     aggregateResults,
     normalizeTitle,
     parseVodTime,
+    parseSeasonSuffix,
+    parseYear,
     searchRelevanceTier,
     rankSearchGroups,
     formatRemarks,

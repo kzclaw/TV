@@ -153,4 +153,25 @@ const item = (name, year, source, id, extra) => Object.assign({
     assert.equal(groups[0].sourceCount, 1);
 }
 
+// 13) 年份脏值不拆卡：源站把同一部片写成 "2019" 和 "2019–"，应合成 1 组
+{
+    const groups = aggregateResults([
+        item('庆余年第一季', '2019', 'ruyi', '1'),
+        item('庆余年第一季', '2019–', 'mdzy', '2')
+    ]);
+    assert.equal(groups.length, 1, '年份写法不同不应拆成多组');
+    assert.equal(groups[0].items.length, 2);
+    assert.equal(groups[0].year, '2019', '年份应归一为 4 位');
+}
+
+// 14) 年份脏值 "0" 视为无年份，且不与真实年份合并
+{
+    const groups = aggregateResults([
+        item('春酒庆团圆', '0', 'bfzy', '1'),
+        item('春酒庆团圆', '', 'ruyi', '2')
+    ]);
+    assert.equal(groups.length, 1, '"0" 与空年份应视为同一年份');
+    assert.equal(groups[0].year, '', '"0" 不是年份，应归到无年份');
+}
+
 console.log('aggregate.test.js: 全部断言通过 ✓');
