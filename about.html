@@ -6,6 +6,9 @@
 	<title>关于我们 - KzTv</title>
 	<meta name="description" content="KzTv 是一个免费的多源视频搜索与观看平台，聚合多个公开视频源，无需注册，打开即用。">
 	<link rel="stylesheet" href="css/tailwind.css">
+	<link rel="stylesheet" href="css/tokens.css">
+	<link rel="stylesheet" href="css/components.css">
+	<link rel="stylesheet" href="css/film-grain.css">
 	<link rel="stylesheet" href="css/styles.css">
 	<link rel="manifest" href="manifest.json">
 
@@ -14,11 +17,11 @@
     <link rel="icon" href="image/logo.png">
     <link rel="apple-touch-icon" href="image/logo-black.png">
 </head>
-<body class="page-bg text-white flex flex-col min-h-screen">
-	<header class="border-b border-[#333] bg-[#0a0a0a] p-4">
-        <div class="container mx-auto flex items-center">
+<body class="kt-page kt-grain">
+	<header class="border-b border-[var(--kt-line)] bg-[var(--kt-bg2)] p-4">
+        <div class="kt-shell flex items-center">
             <div class="flex items-center">
-                <a href="/" class="flex items-center">
+                <a href="/" class="kt-logo">
                     <img src="image/logo-black.png" alt="KzTv Logo" class="w-8 h-8 mr-2 rounded-lg">
                     <h1 class="text-xl font-bold gradient-text">KzTv</h1>
                 </a>
@@ -26,45 +29,45 @@
         </div>
 	</header>
 
-	<main class="flex-1 py-8 sm:py-12 px-4">
+	<main class="kt-main py-8 sm:py-12 px-4">
 		<div class="max-w-5xl mx-auto">
 			<div class="text-center mb-8 sm:mb-12">
-				<h2 class="text-xl sm:text-2xl font-semibold">关于 KzTv</h2>
+				<h2 class="text-xl sm:text-2xl font-semibold text-[var(--kt-text)]">关于 KzTv</h2>
 			</div>
 
 			<div class="space-y-8 sm:space-y-12">
 				<!-- 这是什么 -->
-				<section class="bg-[#1a1a1a] border border-[#333] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
-					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">这是什么</h2>
-					<p class="text-gray-300 text-base sm:text-lg leading-relaxed mb-4">
+				<section class="bg-[var(--kt-surface)] border border-[var(--kt-line)] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
+					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-[var(--kt-brand)] to-[var(--kt-accent,#F472B6)] bg-clip-text text-transparent">这是什么</h2>
+					<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed mb-4">
 						KzTv 是一个免费的多源视频搜索与观看平台。它把多个公开的视频采集接口聚合到一处，
 						你在站内搜索，即可浏览各个来源提供的片单并跳转播放。
 					</p>
-					<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
-						本站<b class="text-gray-200">只做搜索与跳转</b>：不存储、不上传、不转存任何视频文件，
+					<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
+						本站<b class="text-[var(--kt-text)]">只做搜索与跳转</b>：不存储、不上传、不转存任何视频文件，
 						视频内容全部来自第三方公开接口，由浏览器直接向源站请求播放。
 					</p>
 				</section>
 
 				<!-- 隐私政策 -->
-				<section class="bg-[#1a1a1a] border border-[#333] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
-					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">隐私政策</h2>
+				<section class="bg-[var(--kt-surface)] border border-[var(--kt-line)] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
+					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-[var(--kt-brand)] to-[var(--kt-accent,#F472B6)] bg-clip-text text-transparent">隐私政策</h2>
 
 					<div class="space-y-6">
 						<div>
-							<h3 class="text-lg sm:text-xl font-semibold text-gray-200 mb-2">数据保护</h3>
-							<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
+							<h3 class="text-lg sm:text-xl font-semibold text-[var(--kt-text)] mb-2">数据保护</h3>
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
 								本站不收集你的个人身份信息，不接入第三方统计与广告追踪。
 								你输入的搜索词只会发送到对应的采集接口，用于返回结果，不会被本站留存。
 							</p>
 						</div>
 
 						<div>
-							<h3 class="text-lg sm:text-xl font-semibold text-gray-200 mb-2">本地存储</h3>
-							<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
+							<h3 class="text-lg sm:text-xl font-semibold text-[var(--kt-text)] mb-2">本地存储</h3>
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
 								仅在你自己的浏览器里保存少量必要状态，例如搜索偏好、播放进度，
-								以及（若站点设置了访问密码）该密码的<b class="text-gray-200">哈希值</b>——
-								用于向站内代理发起请求时出示凭证。<b class="text-gray-200">密码本体不会写入浏览器存储</b>，
+								以及（若站点设置了访问密码）该密码的<b class="text-[var(--kt-text)]">哈希值</b>——
+								用于向站内代理发起请求时出示凭证。<b class="text-[var(--kt-text)]">密码本体不会写入浏览器存储</b>，
 								也只会以哈希形式出现在页面脚本里。清空浏览器数据即可全部清除。
 							</p>
 						</div>
@@ -72,14 +75,14 @@
 				</section>
 
 				<!-- 免责与投诉 -->
-				<section class="bg-[#1a1a1a] border border-[#333] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
-					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">版权声明与免责</h2>
+				<section class="bg-[var(--kt-surface)] border border-[var(--kt-line)] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
+					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-[var(--kt-brand)] to-[var(--kt-accent,#F472B6)] bg-clip-text text-transparent">版权声明与免责</h2>
 
 					<div class="space-y-6">
 						<div>
-							<h3 class="text-lg sm:text-xl font-semibold text-gray-200 mb-3">免责声明</h3>
-							<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
-								本站仅提供视频<b class="text-gray-200">搜索与播放入口</b>，不提供资源下载，
+							<h3 class="text-lg sm:text-xl font-semibold text-[var(--kt-text)] mb-3">免责声明</h3>
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
+								本站仅提供视频<b class="text-[var(--kt-text)]">搜索与播放入口</b>，不提供资源下载，
 								也不存储任何视频内容。全部片单与播放地址均来自第三方公开接口，
 								其内容由第三方独立提供并独立负责，本站不对其合法性、准确性或可用性作出任何保证。
 								视频中出现的广告与本站无关，请勿相信或点击。
@@ -87,18 +90,18 @@
 						</div>
 
 						<div>
-							<h3 class="text-lg sm:text-xl font-semibold text-gray-200 mb-3">使用须知</h3>
-							<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
+							<h3 class="text-lg sm:text-xl font-semibold text-[var(--kt-text)] mb-3">使用须知</h3>
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
 								使用本站服务须遵守相关法律法规，不得利用搜索结果从事侵权行为。
 							</p>
 						</div>
 
 						<div>
-							<h3 class="text-lg sm:text-xl font-semibold text-gray-200 mb-3">投诉反馈</h3>
-							<p class="text-gray-300 text-base sm:text-lg mb-4 sm:mb-6 leading-relaxed">
+							<h3 class="text-lg sm:text-xl font-semibold text-[var(--kt-text)] mb-3">投诉反馈</h3>
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg mb-4 sm:mb-6 leading-relaxed">
 								如发现需要处理的问题，请联系：
 							</p>
-							<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
+							<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
 								<a href="mailto:kzclaw@kwokzit.info" class="text-blue-400 hover:text-blue-300 transition-colors text-base sm:text-lg font-medium break-all">kzclaw@kwokzit.info</a>
 							</p>
 						</div>
@@ -106,34 +109,34 @@
 				</section>
 
 				<!-- 技术与授权 -->
-				<section class="bg-[#1a1a1a] border border-[#333] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
-					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">技术与授权</h2>
-					<p class="text-gray-300 text-base sm:text-lg leading-relaxed mb-4">
-						本站部署在 <b class="text-gray-200">Cloudflare Pages</b>，内置多个公开采集源，
+				<section class="bg-[var(--kt-surface)] border border-[var(--kt-line)] rounded-lg sm:rounded-xl p-4 sm:p-6 max-w-2xl mx-auto">
+					<h2 class="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-[var(--kt-brand)] to-[var(--kt-accent,#F472B6)] bg-clip-text text-transparent">技术与授权</h2>
+					<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed mb-4">
+						本站部署在 <b class="text-[var(--kt-text)]">Cloudflare Pages</b>，内置多个公开采集源，
 						无需注册、打开即用。
 					</p>
-					<p class="text-gray-300 text-base sm:text-lg leading-relaxed mb-4">
-						本项目基于 <a href="https://github.com/LibreSpark/LibreTV" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 transition-colors">LibreTV</a>
+					<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed mb-4">
+						本项目基于 <a href="https://github.com/LibreSpark/LibreTV" target="_blank" rel="noopener" class="text-[var(--kt-brand)] hover:text-[var(--kt-brand-2)] transition-colors">LibreTV</a>
 						派生并修改，原项目的作者与版权声明予以保留。
 					</p>
-					<p class="text-gray-300 text-base sm:text-lg leading-relaxed">
-						本项目按 <b class="text-gray-200">GNU Affero General Public License v3.0 或更高版本</b> 授权。
+					<p class="text-[var(--kt-text-2)] text-base sm:text-lg leading-relaxed">
+						本项目按 <b class="text-[var(--kt-text)]">GNU Affero General Public License v3.0 或更高版本</b> 授权。
 					</p>
 				</section>
 			</div>
 		</div>
 	</main>
 
-	<footer class="border-t border-[#333] bg-[#0a0a0a] p-4 mt-8">
-        <div class="container mx-auto px-4">
+	<footer class="border-t border-[var(--kt-line)] bg-[var(--kt-bg2)] p-4 mt-8">
+        <div class="kt-shell">
             <div class="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div class="flex items-center">
                     <img src="image/logo-black.png" alt="KzTv Logo" class="w-8 h-8 mr-2 rounded-lg">
                     <span class="gradient-text font-bold">KzTv</span>
                 </div>
-                <p class="text-gray-500 text-sm mt-2 text-center md:text-left">© 2026 KzTv - 自由观影，畅享精彩</p>
+                <p class="text-[var(--kt-text-3)] text-sm mt-2 text-center md:text-left">© 2026 KzTv - 自由观影，畅享精彩</p>
                 <div class="flex items-center space-x-4">
-                    <p class="text-gray-500 text-sm max-w-md">
+                    <p class="text-[var(--kt-text-3)] text-sm max-w-md">
                         搜索结果来自第三方，本站不存储视频内容。
                     </p>
                     <nav class="flex space-x-4">
