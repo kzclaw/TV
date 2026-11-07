@@ -123,11 +123,12 @@ function groupLatestTime(group) {
  * 搜索结果分档 + 排序：
  * - 不相关的结果直接丢弃（上游特意不兜底取搜索第一条，否则搜到的会是别的影片）
  * - A 档在前、B 档在后
- * - 同档内「与查询重合得多的在前」→ 再「上映年份早的在前」→ 再「源数多的在前」→ 再「vod_time 新的在前」
+ * - 同档内「与查询重合得多的在前」→ 再「上映年份新的在前」→ 再「源数多的在前」→ 再「vod_time 新的在前」
  *   重合度用公共前缀长度衡量：搜「哈利波特4火焰杯」时「哈利波特4火焰杯(普通话版)」前缀 8 字、
  *   「哈利·波特与魔法石」只有 4 字，前者必须排前面，否则用户搜具体某一部却被同系列老片压住。
  *   搜「哈利波特」时所有命中前缀都是 4 字（= 查询全长），并列后落到年份序，
- *   系列片按上映顺序排列（魔法石2001 → 密室2002 → 火焰杯2005 → 混血王子2009）。
+ *   系列片按上映时间从新到旧排列（混血王子2009 → 火焰杯2005 → 魔法石2001）。
+ *   年份缺失的条目没有先后可依，排在同档末尾。
  * 返回带 tier 标记的分组（B 档渲染时标「近似」，始终与 A 档分开）。
  */
 function rankSearchGroups(groups, query) {
@@ -147,7 +148,7 @@ function rankSearchGroups(groups, query) {
         .sort((a, b) => {
             if (a.tier !== b.tier) return a.tier === SEARCH_TIER_EXACT ? -1 : 1;
             if (a.specificity !== b.specificity) return b.specificity - a.specificity;
-            if (a.year !== b.year) return (a.year || 9999) - (b.year || 9999);
+            if (a.year !== b.year) return (b.year || 0) - (a.year || 0);
             if (a.group.sourceCount !== b.group.sourceCount) return b.group.sourceCount - a.group.sourceCount;
             return b.time - a.time;
         })

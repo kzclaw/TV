@@ -1,4 +1,4 @@
-// 搜索相关性两档 + 年份序的自检：node tests/search-relevance.test.js
+// 搜索相关性两档 + 年份序（新的在前）的自检：node tests/search-relevance.test.js
 // A 档 = 归一后完全相等；B 档 = 同系列（季数别名 / 前缀扩展 / 公共前缀≥4），单列、不与 A 档合并；其余不展示
 // 样本用实测到的真实片名：393 个真实片名里有 13 个「别的片名以它开头」，
 // 合并会把「步步惊心」和「步步惊心泰国版」当成一部，用户点进去播到错的内容。
@@ -94,7 +94,7 @@ assert.equal(parseYear({ vod_year: '0' }), 0, '"0" 不是年份');
 assert.equal(parseYear({ vod_year: '2019–' }), 2019, '"2019–" 抽出 2019');
 assert.equal(parseYear({ vod_year: '0', vod_pubdate: '2019-11-26(中国内地)' }), 2019, '退回 pubdate');
 
-// 11) 年份序：同系列按上映年份排（实测「哈利波特」→ 魔法石2001 → 密室2002 → 火焰杯2005 → 混血王子2009）
+// 11) 年份序：同系列按上映年份排，新的在前（实测「哈利波特」→ 混血王子2009 → 火焰杯2005 → 魔法石2001）
 {
     const groups = rankSearchGroups(groupsOf([
         item('哈利·波特与混血王子', 'a', '1', undefined, '2009'),
@@ -102,8 +102,8 @@ assert.equal(parseYear({ vod_year: '0', vod_pubdate: '2019-11-26(中国内地)' 
         item('哈利·波特与魔法石', 'a', '3', undefined, '2001')
     ]), '哈利波特');
 
-    assert.deepEqual(groups.map(g => g.name), ['哈利·波特与魔法石', '哈利·波特与火焰杯', '哈利·波特与混血王子'],
-        '同系列按上映年份升序（观影顺序），不是按源数或更新时间的倒序');
+    assert.deepEqual(groups.map(g => g.name), ['哈利·波特与混血王子', '哈利·波特与火焰杯', '哈利·波特与魔法石'],
+        '同系列按上映年份降序（新的在前），不是按源数或更新时间的倒序');
 }
 
 // 12) 年份缺失排最后（vod_year="0" 且无 pubdate）
@@ -127,8 +127,8 @@ assert.equal(parseYear({ vod_year: '0', vod_pubdate: '2019-11-26(中国内地)' 
     ]), '哈利波特4火焰杯');
 
     assert.deepEqual(groups.map(g => g.name),
-        ['哈利波特4火焰杯(普通话版)', '哈利·波特与魔法石', '哈利·波特与混血王子'],
-        '搜具体某一部时，最贴合查询的排最前，其余同系列仍按年份升序');
+        ['哈利波特4火焰杯(普通话版)', '哈利·波特与混血王子', '哈利·波特与魔法石'],
+        '搜具体某一部时，最贴合查询的排最前，其余同系列按年份降序');
 }
 
 // 14) 搜系列名时具体度并列 → 仍按年份序（不能让具体度键压掉年份序）
@@ -138,8 +138,8 @@ assert.equal(parseYear({ vod_year: '0', vod_pubdate: '2019-11-26(中国内地)' 
         item('哈利·波特与魔法石', 'a', '2', undefined, '2001')
     ]), '哈利波特');
 
-    assert.deepEqual(groups.map(g => g.name), ['哈利·波特与魔法石', '哈利·波特与混血王子'],
-        '搜系列名时前缀长度相同并列，落回年份升序');
+    assert.deepEqual(groups.map(g => g.name), ['哈利·波特与混血王子', '哈利·波特与魔法石'],
+        '搜系列名时前缀长度相同并列，落回年份降序（新的在前）');
 }
 
 console.log('search-relevance.test.js: 全部断言通过 ✓');
