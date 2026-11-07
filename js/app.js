@@ -645,6 +645,8 @@ async function search() {
 
     // 后台的最近更新加载让路：它正占着本站的连接，会把搜索请求堵在队列里
     if (typeof abortLatestUpdates === 'function') abortLatestUpdates();
+    // 片源状态板的探测同样让路（它也是后台自动发起的代理请求）
+    if (window.SourceBoard && typeof window.SourceBoard.abort === 'function') window.SourceBoard.abort();
 
     showLoading();
 

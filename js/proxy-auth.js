@@ -65,13 +65,15 @@ async function addAuthToProxyUrl(url) {
             return url;
         }
         
-        // 添加时间戳防止重放攻击
-        const timestamp = Date.now();
+        // 只带 auth，不带时间戳。
+        // 时间戳会让每次请求的 URL 都不同 → 浏览器与 CDN 的 HTTP 缓存一次都命不中，
+        // 代理自己设的 max-age 变成摆设；而服务端把 t 视为可选校验（没有它照样放行），
+        // 所以去掉它不影响鉴权，只会让缓存真正生效。
         
         // 检查URL是否已包含查询参数
         const separator = url.includes('?') ? '&' : '?';
         
-        return `${url}${separator}auth=${encodeURIComponent(hash)}&t=${timestamp}`;
+        return `${url}${separator}auth=${encodeURIComponent(hash)}`;
     } catch (error) {
         console.error('添加代理鉴权失败:', error);
         return url;

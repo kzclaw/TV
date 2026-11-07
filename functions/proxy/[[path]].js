@@ -48,6 +48,54 @@ const DOH_TIMEOUT_MS = 3000;
 // 模块级 DNS 缓存：host -> { at, ttl, ips, error }
 const dnsCache = new Map();
 
+// JSON 响应在浏览器 / KV 里的缓存时长（秒）。
+// 搜索结果与「最近更新」必须新鲜 —— 之前 JSON 被判成非 JSON 时落到了 24h 分支，
+// 结果同一个关键词一天之内搜出来的都是旧数据。
+const JSON_CACHE_TTL = 60;
+
+/**
+ * 出网信号 = 硬超时 ∪ 客户端断开
+ *
+ * 为什么两样都要：
+ *   ① 硬超时 —— 源站挂住时代理不能无限等。客户端（探针 8s、搜索 10s）会先放弃，
+ *      但服务端连接还占着 → 把浏览器对本站的连接槽占满 → 用户点搜索「没反应」。
+ *   ② 客户端断开 —— 用户已经走了，服务端不该继续把源站请求挂着。
+ *
+ * 纯函数，导出给自检（tests/proxy-upstream-timeout.test.js）。
+ * ⚠ clientSignal 通常是 request.signal；平台要在开了 enable_request_signal 兼容标志
+ *   （或 compatibility date ≥ 2026-11-17）之后，客户端断开时它才会真的 abort。
+ */
+export function buildUpstreamSignal(clientSignal, timeoutMs) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    if (!clientSignal) return timeoutSignal;
+    if (typeof AbortSignal.any === 'function') {
+        try {
+            return AbortSignal.any([clientSignal, timeoutSignal]);
+        } catch (e) {
+            // 运行环境不支持就退化成只用超时信号（仍能防无限挂）
+        }
+    }
+    return timeoutSignal;
+}
+
+/**
+ * JSON 判定：不能只看 content-type。
+ * 采集站普遍用 text/html 送 JSON（实测 21/24 个源如此），只看 content-type 会判错，
+ * 让 JSON 落到长缓存分支（搜索结果 24 小时不更新）。
+ * 兜底看 body 的首个非空白字符：{ 或 [ 就是 JSON。
+ */
+export function isJsonPayload(bytes, contentType) {
+    const ct = (contentType || '').toLowerCase();
+    if (ct.includes('application/json') || ct.includes('+json')) return true;
+    if (!bytes || !bytes.length) return false;
+    for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+        const c = bytes[i];
+        if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) continue; // 跳过空白
+        return c === 0x7b || c === 0x5b;                                  // { 或 [
+    }
+    return false;
+}
+
 /** 去掉 IPv6 字面量外层的方括号（"[::1]" → "::1"） */
 function stripBrackets(host) {
     return String(host == null ? '' : host).trim().replace(/^\[+/, '').replace(/\]+$/, '');
@@ -256,12 +304,12 @@ class SsrfBlockedError extends Error {
 }
 
 /** 带 SSRF 校验的取数：每一跳重定向都重新校验，最多跟 MAX_REDIRECT_HOPS 跳 */
-async function fetchWithSsrfGuard(targetUrl, headers) {
+async function fetchWithSsrfGuard(targetUrl, headers, signal) {
     let current = targetUrl;
     for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
         const verdict = await checkOutboundTarget(current);
         if (!verdict.ok) throw new SsrfBlockedError(current, verdict.reason);
-        const response = await fetch(current, { headers, redirect: 'manual' });
+        const response = await fetch(current, { headers, redirect: 'manual', signal });
         const location = (response.status >= 300 && response.status < 400)
             ? response.headers.get('location')
             : null;
@@ -346,6 +394,10 @@ export async function onRequest(context) {
     const DEBUG_ENABLED = (env.DEBUG === 'true');
     const CACHE_TTL = parseInt(env.CACHE_TTL || '86400'); // 默认 24 小时
     const MAX_RECURSION = parseInt(env.MAX_RECURSION || '5'); // 默认 5 层
+    // 出网硬超时（毫秒）：源站挂住时代理不能无限等。
+    // 取 8s：短于搜索的单源死线（10s），让服务端先收尾并给出明确状态，
+    // 而不是客户端放弃后服务端还占着连接。
+    const UPSTREAM_TIMEOUT_MS = parseInt(env.UPSTREAM_TIMEOUT_MS || '8000');
     // 广告过滤已移至播放器处理，代理不再执行
     let USER_AGENTS = [ // 提供一个基础的默认值
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -366,6 +418,8 @@ export async function onRequest(context) {
     }
     // --- 配置读取结束 ---
 
+    // 出网信号：硬超时 + 客户端断开（见 buildUpstreamSignal 的注释）
+    const upstreamSignal = buildUpstreamSignal(request.signal, UPSTREAM_TIMEOUT_MS);
 
     // --- 辅助函数 ---
 
@@ -474,8 +528,10 @@ export async function onRequest(context) {
         }
         // API 的 JSON 数据必须保持新鲜（搜索结果 / 最近更新列表）：
         // 原先沿用 24h 缓存，会让浏览器一天内看不到新内容；媒体文件仍走长缓存。
-        const isJsonContent = (contentType || '').toLowerCase().includes('application/json');
-        headers.set('Cache-Control', isJsonContent ? 'public, max-age=60' : `public, max-age=${CACHE_TTL}`);
+        // 判定不能只看 content-type —— 采集站普遍用 text/html 送 JSON（实测 21/24 个源如此），
+        // 只看 content-type 会把 JSON 判成非 JSON → 落进 24h 分支。
+        const isJsonContent = isJsonPayload(bytes, contentType);
+        headers.set('Cache-Control', isJsonContent ? `public, max-age=${JSON_CACHE_TTL}` : `public, max-age=${CACHE_TTL}`);
         return createResponse(bytes, status, headers);
     }
 
@@ -536,7 +592,7 @@ export async function onRequest(context) {
     }
 
     // 获取远程内容及其类型（二进制安全：整段走 arrayBuffer，绝不用 text()）
-    async function fetchContentWithType(targetUrl, rangeHeader) {
+    async function fetchContentWithType(targetUrl, rangeHeader, signal) {
         const headers = new Headers({
             'User-Agent': getRandomUserAgent(),
             'Accept': '*/*',
@@ -554,7 +610,7 @@ export async function onRequest(context) {
             // 直接请求目标 URL
             logDebug(`开始直接请求: ${targetUrl}`);
             // 出网前做 SSRF 校验（协议/端口/私网 IP/DoH 解析），重定向逐跳重新校验
-            const response = await fetchWithSsrfGuard(targetUrl, headers);
+            const response = await fetchWithSsrfGuard(targetUrl, headers, signal);
 
             if (!response.ok) {
                  const errorBody = await response.text().catch(() => '');
@@ -758,7 +814,7 @@ export async function onRequest(context) {
         }
 
         logDebug(`选择的子列表 (带宽: ${highestBandwidth}): ${bestVariantUrl}`);
-        const { bytes: variantBytes, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl);
+        const { bytes: variantBytes, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl, undefined, upstreamSignal);
 
         if (!isM3u8Content(variantBytes, variantContentType)) {
             logDebug(`获取到的子列表 ${bestVariantUrl} 不是 M3U8 内容 (类型: ${variantContentType})。可能直接是媒体文件，返回原始内容。`);
@@ -852,7 +908,7 @@ export async function onRequest(context) {
         }
 
         // --- 实际请求 ---
-        const { bytes, contentType, responseHeaders, status } = await fetchContentWithType(targetUrl, clientRange);
+        const { bytes, contentType, responseHeaders, status } = await fetchContentWithType(targetUrl, clientRange, upstreamSignal);
 
         // --- 写入缓存 (KV) ---
         if (cacheable) {
@@ -860,8 +916,11 @@ export async function onRequest(context) {
                  const headersToCache = {};
                  responseHeaders.forEach((value, key) => { headersToCache[key.toLowerCase()] = value; });
                  const cacheValue = { body: bytesToBase64(bytes), headers: JSON.stringify(headersToCache) };
+                 // KV 写入的 TTL 也要分类型：JSON（搜索结果 / 最近更新）用短 TTL，
+                 // 否则搜索结果会在 KV 里躺满 24 小时；媒体文件沿用长 TTL。
+                 const kvTtl = isJsonPayload(bytes, contentType) ? JSON_CACHE_TTL : CACHE_TTL;
                  // 注意 KV 写入限制
-                 waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: CACHE_TTL }));
+                 waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: kvTtl }));
                  logDebug(`已将原始内容写入缓存: ${targetUrl}`);
             } catch (kvError) {
                  logDebug(`向 KV 写入缓存失败 (${cacheKey}): ${kvError.message}`);

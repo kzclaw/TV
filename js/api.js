@@ -533,43 +533,57 @@ async function collectLatestFromSource(source, signal) {
     const base = API_SITES[source].api;
     const collected = [];
 
-    for (let first = 1; first <= LATEST_MAX_PAGES_PER_SOURCE; first += LATEST_PAGE_BATCH) {
-        const batch = [];
-        for (let pg = first; pg < first + LATEST_PAGE_BATCH && pg <= LATEST_MAX_PAGES_PER_SOURCE; pg++) {
-            batch.push(fetchSourceData(`${base}?ac=videolist&pg=${pg}`, LATEST_PAGE_TIMEOUT_MS, signal)
-                .catch(error => {
-                    if (signal && signal.aborted) return null;
-                    console.warn(`${source}源第 ${pg} 页获取失败:`, error);
-                    return null;
-                }));
+    // 取一页，顺带返回「这一页里最旧条目的时间」
+    const takePage = async (pg) => {
+        const data = await fetchSourceData(`${base}?ac=videolist&pg=${pg}`, LATEST_PAGE_TIMEOUT_MS, signal);
+        let oldest = 0;
+        for (const item of data.list) {
+            // vod_time 是本地时间字符串、无时区，parseVodTime 按浏览器本地时区解析
+            const time = parseVodTime(item.vod_time);
+            if (time && (!oldest || time < oldest)) oldest = time;
+            if (!time || time < cutoff) continue;                 // 窗口外直接丢弃
+            collected.push({
+                ...item,
+                source_name: API_SITES[source].name,
+                source_code: source
+            });
         }
-        const pages = await Promise.all(batch);
+        return oldest;
+    };
 
-        for (let i = 0; i < pages.length; i++) {
-            const data = pages[i];
-            const pg = first + i;
-            // 某页失败 → 该源就到此为止，用已取到的部分，不影响其它源
-            if (!data) {
-                if (pg === first) throw new Error(`${source}源第 ${pg} 页获取失败`);
-                return collected;
-            }
+    // 第 1 页单独取：多数源第 1 页就已经覆盖了 3 天窗口 → 一个源只花 1 个请求。
+    // 原来是把 3 页一次性并行发出去、判断放在后面 → 典型情况白花 2 个请求
+    // （每页都是几十~几百 KB 的全量列表，白白占带宽和连接槽）。
+    let firstOldest;
+    try {
+        firstOldest = await takePage(1);
+    } catch (error) {
+        if (signal && signal.aborted) return collected;
+        console.warn(`${source}源第 1 页获取失败:`, error);
+        throw new Error(`${source}源第 1 页获取失败`);
+    }
+    // 该页最旧的条目已早于窗口 → 不用再翻后面的页
+    if (firstOldest && firstOldest < cutoff) return collected;
 
-            let oldest = 0;
-            for (const item of data.list) {
-                // vod_time 是本地时间字符串、无时区，parseVodTime 按浏览器本地时区解析
-                const time = parseVodTime(item.vod_time);
-                if (time && (!oldest || time < oldest)) oldest = time;
-                if (!time || time < cutoff) continue;                 // 窗口外直接丢弃
-                collected.push({
-                    ...item,
-                    source_name: API_SITES[source].name,
-                    source_code: source
-                });
-            }
-
-            // 该页最旧的条目已早于窗口 → 不用再翻后面的页
-            if (oldest && oldest < cutoff) return collected;
+    // 窗口还没覆盖 → 剩下的页并行取
+    const rest = [];
+    for (let pg = 2; pg <= LATEST_MAX_PAGES_PER_SOURCE && rest.length < LATEST_PAGE_BATCH; pg++) {
+        rest.push(pg);
+    }
+    const results = await Promise.all(rest.map(async (pg) => {
+        try {
+            return { pg, oldest: await takePage(pg) };
+        } catch (error) {
+            if (signal && signal.aborted) return null;
+            console.warn(`${source}源第 ${pg} 页获取失败:`, error);
+            return null;
         }
+    }));
+
+    // 某页失败 → 该源就到此为止，用已取到的部分，不影响其它源
+    for (const r of results) {
+        if (!r) return collected;
+        if (r.oldest && r.oldest < cutoff) break;
     }
 
     return collected;

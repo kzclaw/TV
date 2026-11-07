@@ -16,6 +16,16 @@ const BOARD_PROBE_TIMEOUT = 8000;            // 单个源 8 秒超时
 const BOARD_PROBE_CONCURRENCY = 2;           // 同时最多探 2 个源
 
 let boardProbeTimer = null;
+let boardProbeController = null;
+
+// 用户开始搜索时中止整批探测：探测请求占着本站的连接槽，
+// 不该跟用户的前台操作抢（与「最近更新」的中止是同一套机制）。
+function abortBoardProbe() {
+    if (boardProbeController) {
+        boardProbeController.abort();
+        boardProbeController = null;
+    }
+}
 
 // 读当前勾选的源（与 js/app.js 的默认集一致）
 function boardSelectedKeys() {
@@ -116,14 +126,16 @@ function renderSourceBoard() {
 }
 
 // 探一个源：一次真实请求，记耗时
-async function probeOneSource(key) {
+async function probeOneSource(key, signal) {
     const site = (window.API_SITES || {})[key];
     if (!site || !site.api) return { ok: false, ms: -1 };
     const started = performance.now();
     try {
-        await fetchSourceData(site.api + '?ac=videolist&pg=1', BOARD_PROBE_TIMEOUT);
+        await fetchSourceData(site.api + '?ac=videolist&pg=1', BOARD_PROBE_TIMEOUT, signal);
         return { ok: true, ms: Math.max(1, Math.round(performance.now() - started)), at: Date.now() };
     } catch (e) {
+        // 被中止不等于这个源坏了：不该把它记成「超时」
+        if (signal && signal.aborted) return null;
         return { ok: false, ms: -1, at: Date.now() };
     }
 }
@@ -154,11 +166,18 @@ async function probeSources(force) {
 
     if (!needProbe.length) return;
 
+    // 同一批探测共用一个 controller：用户开始搜索时可以整批中止
+    if (boardProbeController) boardProbeController.abort();
+    boardProbeController = new AbortController();
+    const signal = boardProbeController.signal;
+
     let index = 0;
     const worker = async function () {
         while (index < needProbe.length) {
+            if (signal.aborted) break;
             const key = needProbe[index++];
-            const result = await probeOneSource(key);
+            const result = await probeOneSource(key, signal);
+            if (!result) continue;   // 被中止 → 不记结果
             const c = boardProbeCache();
             c[key] = result;
             boardSaveProbeCache(c);
@@ -171,6 +190,8 @@ async function probeSources(force) {
         workers.push(worker());
     }
     await Promise.all(workers);
+    // 只清自己那批，别把后启动的一批的 controller 清掉
+    if (boardProbeController && boardProbeController.signal === signal) boardProbeController = null;
     renderSourceBoard();
 }
 
@@ -194,7 +215,8 @@ function initSourceBoard() {
 
 window.SourceBoard = {
     refresh: renderSourceBoard,
-    probe: probeSources
+    probe: probeSources,
+    abort: abortBoardProbe
 };
 
 document.addEventListener('DOMContentLoaded', initSourceBoard);
