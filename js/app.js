@@ -570,7 +570,7 @@ function resetSearchArea() {
 
     // 恢复搜索区域的样式
     document.getElementById('searchArea').classList.add('flex-1');
-    document.getElementById('searchArea').classList.remove('mb-8');
+    document.getElementById('searchArea').classList.remove('mb-8', 'compact');
     document.getElementById('resultsArea').classList.add('hidden');
 
     // 确保页脚正确显示，移除相对定位
@@ -708,8 +708,9 @@ async function search() {
 
 // 显示结果区域（隐藏搜索区与最近更新区块）
 function showResultsArea() {
+    // 展厅收起：只留搜索条，把版面让给结果
     document.getElementById('searchArea').classList.remove('flex-1');
-    document.getElementById('searchArea').classList.add('mb-8');
+    document.getElementById('searchArea').classList.add('mb-8', 'compact');
     document.getElementById('resultsArea').classList.remove('hidden');
 
     const latestArea = document.getElementById('latestArea');
@@ -738,10 +739,20 @@ function renderResults(items, query) {
     const aggregated = aggregateResults(items);
     const groups = query ? rankSearchGroups(aggregated, query) : aggregated;
 
-    // 更新结果计数
+    // 更新结果计数（影片数 + 去重后的来源数）
     const searchResultsCount = document.getElementById('searchResultsCount');
     if (searchResultsCount) {
         searchResultsCount.textContent = groups.length;
+    }
+    const searchResultsSources = document.getElementById('searchResultsSources');
+    if (searchResultsSources) {
+        const sourceNames = new Set();
+        (groups || []).forEach(function (group) {
+            (group.items || []).forEach(function (item) {
+                if (item.source_name) sourceNames.add(item.source_name);
+            });
+        });
+        searchResultsSources.textContent = sourceNames.size;
     }
 
     // 如果没有结果
@@ -759,109 +770,43 @@ function renderResults(items, query) {
         return;
     }
 
-    // 添加XSS保护，使用textContent和属性转义
+    // XSS 保护：所有动态文本走 escapeText，属性同样转义
     const safeResults = groups.map((group, index) => {
         const item = group.items[0];
         const multi = group.items.length > 1;
-
         const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
         const sourceCode = item.source_code || '';
-
-        // 添加API URL属性，用于详情获取
         const apiUrlAttr = item.api_url ?
             `data-api-url="${escapeText(item.api_url)}"` : '';
 
-        // 单源沿用原字段；多源用组内的年份/分类/封面与统一后的备注
         const name = escapeText(multi ? group.name : (item.vod_name || ''));
         const typeName = escapeText(multi ? (group.typeName || '') : (item.type_name || ''));
         const year = escapeText(group.year || '');
-        const remarks = escapeText(multi ? (group.remarks || '') : (item.vod_remarks || ''));
         const pic = String((multi ? group.pic : item.vod_pic) || '');
-
-        // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
         const hasCover = pic.startsWith('http');
+        const approx = group.tier === 'B';
 
-        // 底部来源位：单源显示源名，多源显示「N 个来源」
-        const sourceInfo = multi
-            ? `<span class="bg-pink-600 text-white text-xs px-2 py-0.5 rounded-full">${group.items.length} 个来源</span>`
-            : (item.source_name ?
-                `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${escapeText(item.source_name)}</span>` : '');
-        const expandHint = multi
-            ? '<div><span class="text-gray-500 text-xs">展开 ▾</span></div>'
-            : '';
+        // 海报右下角只放一枚角标：多源数量（品牌金）或「近似」
+        const badge = multi
+            ? `<span class="kt-badge gold">${group.items.length} 源</span>`
+            : (approx ? `<span class="kt-badge">近似</span>` : '');
 
-        const cardBody = `
-                    ${hasCover ? `
-                    <div class="relative flex-shrink-0 search-card-img-container">
-                        <img src="${escapeText(pic)}" alt="${name}" 
-                             class="h-full w-full object-cover transition-transform hover:scale-110" 
-                             onerror="this.onerror=null; this.src='https://via.placeholder.com/300x450?text=无封面'; this.classList.add('object-contain');"
-                             loading="lazy">
-                        <div class="absolute inset-0 bg-gradient-to-r from-black/30 to-transparent"></div>
-                    </div>` : ''}
-                    
-                    <div class="p-2 flex flex-col flex-grow">
-                        <div class="flex-grow">
-                            <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${name}">${name}</h3>
-                            
-                            <div class="flex flex-wrap ${hasCover ? '' : 'justify-center'} gap-1 mb-2">
-                                ${group.tier === 'B' ? `
-                                <span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-yellow-500 text-yellow-300">
-                                          近似
-                                      </span>` : ''}
-                                ${typeName ?
-                `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-blue-500 text-blue-300">
-                                          ${typeName}
-                                      </span>` : ''}
-                                ${year ?
-                `<span class="text-xs py-0.5 px-1.5 rounded bg-opacity-20 bg-purple-500 text-purple-300">
-                                          ${year}
-                                      </span>` : ''}
-                            </div>
-                            <p class="text-gray-400 line-clamp-2 overflow-hidden ${hasCover ? '' : 'text-center'} mb-2">
-                                ${remarks || '暂无介绍'}
-                            </p>
-                        </div>
-                        
-                        <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
-                            ${sourceInfo ? `<div>${sourceInfo}</div>` : '<div></div>'}
-                            <!-- 接口名称过长会被挤变形
-                            <div>
-                                <span class="text-gray-500 flex items-center hover:text-blue-400 transition-colors">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                    </svg>
-                                    播放
-                                </span>
-                            </div>
-                            -->
-                            ${expandHint}
-                        </div>
-                    </div>`;
+        const meta = [typeName, year].filter(Boolean).join(' · ');
 
-        // 单源：点击直接打开该源详情（与聚合前完全一致）
-        if (!multi) {
-            return `
-            <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
-                 onclick="showDetails('${safeId}','${escapeInlineArg(item.vod_name || '')}','${sourceCode}')" ${apiUrlAttr}>
-                <div class="flex h-full">${cardBody}
-                </div>
-            </div>
-        `;
-        }
-
-        // 多源：点击展开来源列表，选一个源再打开该源详情
         return `
-            <div class="card-hover bg-[#111] rounded-lg overflow-hidden transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md flex flex-col" ${apiUrlAttr}>
-                <div class="flex-1 min-h-0 cursor-pointer" onclick="toggleSourcePanel('source-panel-${index}')">
-                    <div class="flex h-full">${cardBody}
-                    </div>
+            <div class="kt-poster" role="button" tabindex="0"
+                 onclick="showDetails('${safeId}','${escapeInlineArg(item.vod_name || '')}','${sourceCode}','${escapeText(pic)}')"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"
+                 ${apiUrlAttr}>
+                <div class="cover">
+                    ${hasCover ? `<img src="${escapeText(pic)}" alt="${name}" loading="lazy"
+                        onerror="this.onerror=null;this.src='https://via.placeholder.com/300x450?text=无封面';this.classList.add('object-contain');">` : ''}
+                    <div class="veil"></div>
+                    ${badge}
                 </div>
-                <div id="source-panel-${index}" class="hidden border-t border-gray-800 p-2 flex flex-col gap-1.5">
-                    ${buildSourceRows(group.items)}
-                </div>
-            </div>
-        `;
+                <div class="name" title="${name}">${name}</div>
+                <div class="meta">${escapeText(meta)}</div>
+            </div>`;
     }).join('');
 
     resultsDiv.innerHTML = safeResults;
@@ -950,9 +895,9 @@ function toggleClearButton() {
     const searchInput = document.getElementById('searchInput');
     const clearButton = document.getElementById('clearSearchInput');
     if (searchInput.value !== '') {
-        clearButton.classList.remove('hidden');
+        clearButton.hidden = false;
     } else {
-        clearButton.classList.add('hidden');
+        clearButton.hidden = true;
     }
 }
 
@@ -961,7 +906,7 @@ function clearSearchInput() {
     const searchInput = document.getElementById('searchInput');
     searchInput.value = '';
     const clearButton = document.getElementById('clearSearchInput');
-    clearButton.classList.add('hidden');
+    clearButton.hidden = true;
 }
 
 // 劫持搜索框的value属性以检测外部修改
@@ -990,7 +935,7 @@ function hookInput() {
 document.addEventListener('DOMContentLoaded', hookInput);
 
 // 显示详情 - 修改为支持自定义API
-async function showDetails(id, vod_name, sourceCode) {
+async function showDetails(id, vod_name, sourceCode, pic) {
     // 密码保护校验
     if (window.isPasswordProtected && window.isPasswordVerified) {
         if (window.isPasswordProtected() && !window.isPasswordVerified()) {
@@ -1038,44 +983,43 @@ async function showDetails(id, vod_name, sourceCode) {
         const modal = document.getElementById('modal');
         const modalTitle = document.getElementById('modalTitle');
         const modalContent = document.getElementById('modalContent');
+        const modalCta = document.getElementById('modalCta');
 
-        // 显示来源信息
-        const sourceName = data.videoInfo && data.videoInfo.source_name ?
-            ` <span class="text-sm font-normal text-gray-400">(${data.videoInfo.source_name})</span>` : '';
+        const sourceName = data.videoInfo && data.videoInfo.source_name
+            ? String(data.videoInfo.source_name) : '';
 
-        // 不对标题进行截断处理，允许完整显示
-        modalTitle.innerHTML = `<span class="break-words">${vod_name || '未知视频'}</span>${sourceName}`;
+        // 侧栏头部：封面 + 片名 + 来源
+        modalTitle.innerHTML = `
+            <div class="kt-prog-top">
+                <div class="cover">${pic ? `<img src="${escapeText(pic)}" alt="">` : ''}</div>
+                <div>
+                    <h3>${escapeText(vod_name || '未知视频')}</h3>
+                    ${sourceName ? `<div class="kt-psub">${escapeText(sourceName)}</div>` : ''}
+                </div>
+            </div>`;
         currentVideoTitle = vod_name || '未知视频';
 
-        if (data.episodes && data.episodes.length > 0) {
-            // 构建详情信息HTML
+        const canPlay = !!(data.episodes && data.episodes.length);
+
+        if (canPlay) {
+            // 元数据 + 简介
             let detailInfoHtml = '';
             if (data.videoInfo) {
-                // Prepare description text, strip HTML and trim whitespace
-                const descriptionText = data.videoInfo.desc ? data.videoInfo.desc.replace(/<[^>]+>/g, '').trim() : '';
-
-                // Check if there's any actual grid content
-                const hasGridContent = data.videoInfo.type || data.videoInfo.year || data.videoInfo.area || data.videoInfo.director || data.videoInfo.actor || data.videoInfo.remarks;
-
-                if (hasGridContent || descriptionText) { // Only build if there's something to show
+                const info = data.videoInfo;
+                const descriptionText = info.desc ? String(info.desc).replace(/<[^>]+>/g, '').trim() : '';
+                const facts = [
+                    info.type ? ['类型', info.type] : '',
+                    info.year ? ['年份', info.year] : '',
+                    info.area ? ['地区', info.area] : '',
+                    info.director ? ['导演', info.director] : '',
+                    info.actor ? ['主演', info.actor] : '',
+                    info.remarks ? ['画质', info.remarks] : ''
+                ].filter(Boolean);
+                if (facts.length || descriptionText) {
                     detailInfoHtml = `
-                <div class="modal-detail-info">
-                    ${hasGridContent ? `
-                    <div class="detail-grid">
-                        ${data.videoInfo.type ? `<div class="detail-item"><span class="detail-label">类型:</span> <span class="detail-value">${data.videoInfo.type}</span></div>` : ''}
-                        ${data.videoInfo.year ? `<div class="detail-item"><span class="detail-label">年份:</span> <span class="detail-value">${data.videoInfo.year}</span></div>` : ''}
-                        ${data.videoInfo.area ? `<div class="detail-item"><span class="detail-label">地区:</span> <span class="detail-value">${data.videoInfo.area}</span></div>` : ''}
-                        ${data.videoInfo.director ? `<div class="detail-item"><span class="detail-label">导演:</span> <span class="detail-value">${data.videoInfo.director}</span></div>` : ''}
-                        ${data.videoInfo.actor ? `<div class="detail-item"><span class="detail-label">主演:</span> <span class="detail-value">${data.videoInfo.actor}</span></div>` : ''}
-                        ${data.videoInfo.remarks ? `<div class="detail-item"><span class="detail-label">备注:</span> <span class="detail-value">${data.videoInfo.remarks}</span></div>` : ''}
-                    </div>` : ''}
-                    ${descriptionText ? `
-                    <div class="detail-desc">
-                        <p class="detail-label">简介:</p>
-                        <p class="detail-desc-content">${descriptionText}</p>
-                    </div>` : ''}
-                </div>
-                `;
+                        <div class="kt-facts">${facts.map(f =>
+                            `<b>${escapeText(f[0])}</b><span>${escapeText(String(f[1]))}</span>`).join('')}</div>
+                        ${descriptionText ? `<p class="kt-desc">${escapeText(descriptionText)}</p>` : ''}`;
                 }
             }
 
@@ -1084,33 +1028,22 @@ async function showDetails(id, vod_name, sourceCode) {
 
             modalContent.innerHTML = `
                 ${detailInfoHtml}
-                <div class="flex flex-wrap items-center justify-between mb-4 gap-2">
-                    <div class="flex items-center gap-2">
-                        <button onclick="toggleEpisodeOrder('${sourceCode}', '${id}')" 
-                                class="px-3 py-1.5 bg-[#333] hover:bg-[#444] border border-[#444] rounded text-sm transition-colors flex items-center gap-1">
-                            <svg class="w-4 h-4 transform ${episodesReversed ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
-                            </svg>
-                            <span>${episodesReversed ? '正序排列' : '倒序排列'}</span>
-                        </button>
-                        <span class="text-gray-400 text-sm">共 ${data.episodes.length} 集</span>
-                    </div>
-                    <button onclick="copyLinks()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors">
-                        复制链接
-                    </button>
-                </div>
-                <div id="episodesGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                    ${renderEpisodes(vod_name, sourceCode, id)}
-                </div>
-            `;
+                <div class="kt-sec-t"><span>剧集</span><span class="ln"></span><span>共 ${data.episodes.length} 集</span></div>
+                <div id="episodesGrid" class="kt-epgrid">${renderEpisodes(vod_name, sourceCode, id)}</div>`;
         } else {
             modalContent.innerHTML = `
-                <div class="text-center py-8">
-                    <div class="text-red-400 mb-2">❌ 未找到播放资源</div>
-                    <div class="text-gray-500 text-sm">该视频可能暂时无法播放，请尝试其他视频</div>
-                </div>
-            `;
+                <div class="kt-empty">
+                    <div class="t">未找到播放资源</div>
+                    <div>该视频可能暂时无法播放，请试试「其它来源」</div>
+                </div>`;
         }
+
+        // 底部操作：直接播放 / 找其它来源（复用 source-picker 的跨源搜索 + 测速）
+        modalCta.innerHTML = `
+            <button class="kt-btn pri" style="flex:1;${canPlay ? '' : 'opacity:.45;pointer-events:none;'}" type="button"
+                onclick="playVideo('${escapeInlineArg(canPlay ? data.episodes[0] : '')}','${escapeInlineArg(vod_name || '')}','${sourceCode}',0,'${id}')">播放</button>
+            <button class="kt-btn" type="button"
+                onclick="openProgramSources('${escapeInlineArg(vod_name || '')}')">其它来源</button>`;
 
         modal.classList.remove('hidden');
     } catch (error) {
@@ -1119,6 +1052,20 @@ async function showDetails(id, vod_name, sourceCode) {
     } finally {
         hideLoading();
     }
+}
+
+// 节目单里的「其它来源」：复用 source-picker 的跨源搜索 + 并发测速，
+// 选中某个源后回到详情（而不是直接播放），让用户始终看得见自己在哪。
+function openProgramSources(title) {
+    if (typeof openSourcePicker !== 'function' || !title) return;
+    openSourcePicker({
+        title: title,
+        onPick: function (entry) {
+            if (typeof showDetails === 'function') {
+                showDetails(entry.vodId, entry.name, entry.sourceKey, entry.pic || '');
+            }
+        }
+    });
 }
 
 // 更新播放视频函数，修改为使用/watch路径而不是直接打开player.html

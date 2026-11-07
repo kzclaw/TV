@@ -878,23 +878,19 @@ function updateButtonStates() {
 
     // 处理上一集按钮
     if (currentEpisodeIndex > 0) {
-        prevButton.classList.remove('bg-gray-700', 'cursor-not-allowed');
-        prevButton.classList.add('bg-[#222]', 'hover:bg-[#333]');
+        prevButton.classList.remove('disabled');
         prevButton.removeAttribute('disabled');
     } else {
-        prevButton.classList.add('bg-gray-700', 'cursor-not-allowed');
-        prevButton.classList.remove('bg-[#222]', 'hover:bg-[#333]');
+        prevButton.classList.add('disabled');
         prevButton.setAttribute('disabled', '');
     }
 
     // 处理下一集按钮
     if (currentEpisodeIndex < currentEpisodes.length - 1) {
-        nextButton.classList.remove('bg-gray-700', 'cursor-not-allowed');
-        nextButton.classList.add('bg-[#222]', 'hover:bg-[#333]');
+        nextButton.classList.remove('disabled');
         nextButton.removeAttribute('disabled');
     } else {
-        nextButton.classList.add('bg-gray-700', 'cursor-not-allowed');
-        nextButton.classList.remove('bg-[#222]', 'hover:bg-[#333]');
+        nextButton.classList.add('disabled');
         nextButton.setAttribute('disabled', '');
     }
 }
@@ -920,7 +916,8 @@ function renderEpisodes() {
         html += `
             <button id="episode-${realIndex}" 
                     onclick="playEpisode(${realIndex})" 
-                    class="px-4 py-2 ${isActive ? 'episode-active' : '!bg-[#222] hover:!bg-[#333] hover:!shadow-none'} !border ${isActive ? '!border-blue-500' : '!border-[#333]'} rounded-lg transition-colors text-center episode-btn">
+                    class="kt-ep ${isActive ? 'episode-active' : ''} episode-btn"
+                    style="${isActive ? '' : 'background:var(--kt-raised);'}">
                 ${realIndex + 1}
             </button>
         `;

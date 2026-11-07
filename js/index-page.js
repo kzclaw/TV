@@ -1,72 +1,32 @@
-// 页面加载后显示弹窗脚本
+// 页面加载后：身份位 + 使用声明 + URL 搜索参数处理
 document.addEventListener('DOMContentLoaded', function() {
     // Cloudflare Access 身份：由服务端验签 JWT 后注入 window.__ENV__.ACCESS_NAME
-    // 没有通过 Access（或验签不过）就是空字符串 —— 此时不显示任何欢迎词
+    // 没有通过 Access（或验签不过）就是空字符串 —— 此时不显示任何身份信息
     const accessName = (window.__ENV__ && window.__ENV__.ACCESS_NAME) || '';
 
-    // 弹窗显示脚本
-    // 检查用户是否已经看过声明
-    const hasSeenDisclaimer = localStorage.getItem('hasSeenDisclaimer');
-    
-    if (!hasSeenDisclaimer) {
-        // 显示弹窗
-        const disclaimerModal = document.getElementById('disclaimerModal');
+    renderIdentity(accessName);
+    maybeShowDisclaimer(accessName);
 
-        // 使用声明里加上欢迎词
-        if (accessName) {
-            const welcome = document.createElement('p');
-            welcome.className = 'text-center text-xl font-semibold text-blue-400 mb-4';
-            welcome.textContent = `欢迎回来，${accessName}`;
-            const body = disclaimerModal.querySelector('.text-gray-300');
-            if (body) body.insertBefore(welcome, body.firstChild);
-        }
-
-        disclaimerModal.style.display = 'flex';
-        
-        // 添加接受按钮事件
-        document.getElementById('acceptDisclaimerBtn').addEventListener('click', function() {
-            // 保存用户已看过声明的状态
-            localStorage.setItem('hasSeenDisclaimer', 'true');
-            // 隐藏弹窗
-            disclaimerModal.style.display = 'none';
-        });
-    }
-
-    // 页面常驻欢迎标识（已经看过声明的老用户也能看到自己是谁）
-    const welcomeLine = document.getElementById('welcomeLine');
-    if (welcomeLine && accessName) {
-        welcomeLine.textContent = `欢迎回来，${accessName}`;
-        welcomeLine.classList.remove('hidden');
-    }
-
-    // URL搜索参数处理脚本
-    // 首先检查是否是播放URL格式 (/watch 开头的路径)
+    // 播放URL（/watch 开头）不做额外处理，watch.html 会处理重定向
     if (window.location.pathname.startsWith('/watch')) {
-        // 播放URL，不做额外处理，watch.html会处理重定向
         return;
     }
-    
-    // 检查页面路径中的搜索参数 (格式: /s=keyword)
+
+    // 路径参数 /s=keyword
     const path = window.location.pathname;
     const searchPrefix = '/s=';
-    
+
     if (path.startsWith(searchPrefix)) {
-        // 提取搜索关键词
         const keyword = decodeURIComponent(path.substring(searchPrefix.length));
         if (keyword) {
-            // 设置搜索框的值
             document.getElementById('searchInput').value = keyword;
-            // 显示清空按钮
             toggleClearButton();
-            // 执行搜索
             setTimeout(() => {
-                // 使用setTimeout确保其他DOM加载和初始化完成
                 search();
-                // 更新浏览器历史，不改变URL (保持搜索参数在地址栏)
                 try {
                     window.history.replaceState(
-                        { search: keyword }, 
-                        `搜索: ${keyword} - KzTv`, 
+                        { search: keyword },
+                        `搜索: ${keyword} - KzTv`,
                         window.location.href
                     );
                 } catch (e) {
@@ -75,22 +35,19 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 300);
         }
     }
-    
-    // 也检查查询字符串中的搜索参数 (格式: ?s=keyword)
+
+    // 查询参数 ?s=keyword
     const urlParams = new URLSearchParams(window.location.search);
     const searchQuery = urlParams.get('s');
-    
+
     if (searchQuery) {
-        // 设置搜索框的值
         document.getElementById('searchInput').value = searchQuery;
-        // 执行搜索
         setTimeout(() => {
             search();
-            // 更新URL为规范格式
             try {
                 window.history.replaceState(
-                    { search: searchQuery }, 
-                    `搜索: ${searchQuery} - KzTv`, 
+                    { search: searchQuery },
+                    `搜索: ${searchQuery} - KzTv`,
                     `/s=${encodeURIComponent(searchQuery)}`
                 );
             } catch (e) {
@@ -99,3 +56,56 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 300);
     }
 });
+
+// 顶栏身份位：没身份就整块不显示（不显示任何欢迎词）
+function renderIdentity(name) {
+    const box = document.getElementById('ktIdentity');
+    const label = document.getElementById('ktIdentityName');
+    if (!box || !label || !name) return;
+    label.textContent = name;      // 名字来自 JWT，走 textContent 防注入
+    box.hidden = false;
+    box.title = `已登录：${name}`;
+}
+
+// 使用声明：按版本号记忆 —— 声明内容改了，老用户会重新看到一次
+const KT_DISCLAIMER_VERSION = 'v2-2026-11';
+const KT_DISCLAIMER_KEY = 'ktDisclaimerSeen';
+
+function maybeShowDisclaimer(name) {
+    let seen = null;
+    try {
+        seen = localStorage.getItem(KT_DISCLAIMER_KEY);
+    } catch (e) {
+        seen = null;             // 隐私模式下 localStorage 可能不可用
+    }
+    if (seen === KT_DISCLAIMER_VERSION) return;
+
+    const modal = document.getElementById('ktDisclaimer');
+    if (!modal) return;
+
+    // 有身份时把欢迎词提到标题里（衬线 + 品牌金）
+    const title = document.getElementById('ktDiscTitle');
+    if (title && name) {
+        title.textContent = '欢迎回来，';
+        const em = document.createElement('em');
+        em.textContent = name;
+        title.appendChild(em);
+    }
+
+    modal.hidden = false;
+
+    const accept = document.getElementById('ktDiscAccept');
+    if (accept) {
+        accept.addEventListener('click', function () {
+            try {
+                localStorage.setItem(KT_DISCLAIMER_KEY, KT_DISCLAIMER_VERSION);
+            } catch (e) { /* 存不了就下次再弹，无所谓 */ }
+            modal.hidden = true;
+        }, { once: true });
+    }
+
+    // 点遮罩也能关闭（但不算「已接受」，下次仍会弹）
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) modal.hidden = true;
+    });
+}

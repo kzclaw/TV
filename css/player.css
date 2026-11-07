@@ -156,3 +156,17 @@ body, html {
 
 /* 隐藏用户名输入框 */
 #username { display: none !important; }
+
+/* 自动连播开关 */
+.switch { position: relative; display: inline-block; width: 42px; height: 23px; margin: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; inset: 0; background: rgba(245, 241, 232, .12);
+  border-radius: 999px; transition: background-color .18s var(--kt-ease);
+}
+.switch .slider::before {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px;
+  border-radius: 50%; background: #fff; transition: transform .18s var(--kt-ease);
+}
+.switch input:checked + .slider { background: var(--kt-brand); }
+.switch input:checked + .slider::before { transform: translateX(19px); }

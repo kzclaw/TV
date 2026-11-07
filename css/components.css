@@ -89,6 +89,7 @@
 .kt-btn:hover { border-color: var(--kt-line-2); color: var(--kt-text); }
 .kt-btn.pri { background: var(--kt-brand); color: #171104; border-color: transparent; font-weight: 700; }
 .kt-btn.pri:hover { background: var(--kt-brand-2); }
+.kt-btn.disabled { opacity: .45; pointer-events: none; }
 .kt-btn.danger { color: var(--kt-rust); border-color: rgba(194, 96, 62, .3); background: rgba(194, 96, 62, .08); }
 .kt-btn.danger:hover { border-color: rgba(194, 96, 62, .5); color: var(--kt-rust); }
 .kt-btn.big { height: 42px; padding: 0 20px; font-size: 14px; }
@@ -153,6 +154,12 @@
   transition: background var(--kt-fast);
 }
 .kt-search button:hover { background: var(--kt-brand-2); }
+/* 清空按钮在搜索框里，但要排除金色主按钮的样式 */
+.kt-search .kt-icon-btn {
+  background: transparent; color: var(--kt-text-3);
+  width: 34px; height: 40px; padding: 0; border: 0;
+}
+.kt-search .kt-icon-btn:hover { background: rgba(245, 241, 232, .06); color: var(--kt-text); }
 
 .kt-recent { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
 .kt-recent .lb { font-size: 12px; color: var(--kt-text-3); }
@@ -237,7 +244,7 @@
 }
 .kt-poster .name {
   font-family: var(--kt-font-serif); font-size: 13px; color: var(--kt-text);
-  margin-top: 9px; line-height: 1.35;
+  margin-top: 9px; line-height: 1.35; min-height: 35px;   /* 两行高度：让元信息行对齐 */
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .kt-poster .meta { font-size: 11px; color: var(--kt-text-3); margin-top: 3px; font-family: var(--kt-font-mono); }
@@ -326,7 +333,9 @@
 .kt-pick .nm { font-size: 12.5px; color: var(--kt-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kt-pick .bar { width: 56px; height: 3px; border-radius: 2px; background: rgba(245, 241, 232, .1); overflow: hidden; flex: none; }
 .kt-pick .bar i { display: block; height: 100%; background: var(--kt-brand); }
-.kt-pick .ms { font-family: var(--kt-font-mono); font-size: 11px; color: var(--kt-text-3); width: 46px; text-align: right; flex: none; }
+.kt-pick .ms { font-family: var(--kt-font-mono); font-size: 11px; color: var(--kt-text-3); min-width: 54px; text-align: right; flex: none; }
+.kt-pick .ms .speed-indicator { font-size: 11px; }
+.kt-pick-list { display: flex; flex-direction: column; gap: 2px; }
 .kt-pick .go {
   width: 26px; height: 26px; border-radius: 7px; flex: none;
   background: var(--kt-brand); color: #171104;
@@ -477,10 +486,11 @@
 
 /* ===================== 测速指示（选源卡片 / 源表共用） ===================== */
 .speed-indicator {
-  display: inline-flex; align-items: center; gap: 2px;
-  font-size: 10px; font-weight: 600; line-height: 1;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 600; line-height: 1;
   font-family: var(--kt-font-mono);
 }
+.speed-indicator .kt-dot { width: 6px; height: 6px; }
 .speed-indicator.good { color: var(--kt-jade); }
 .speed-indicator.medium { color: var(--kt-brand); }
 .speed-indicator.poor { color: var(--kt-amber); }
@@ -510,6 +520,30 @@
   animation: kt-spin .8s linear infinite;
 }
 @keyframes kt-spin { to { transform: rotate(360deg); } }
+
+
+/* ===================== 补充：与 Tailwind 的 hidden 类共存 =====================
+   Tailwind 的 .hidden{display:none} 与组件类的 display 同优先级，
+   但组件样式表在后 → 必须显式声明，否则「隐藏」会失效。 */
+.kt-prog.hidden, .kt-cmd.hidden, .kt-modal.hidden,
+.kt-id.hidden, .kt-icon-btn[hidden] { display: none !important; }
+.kt-prog[hidden], .kt-cmd[hidden], .kt-modal[hidden],
+.kt-id[hidden], .kt-btn[hidden] { display: none !important; }
+
+/* 侧栏标题下的来源名 */
+.kt-psub { font-size: 11.5px; color: var(--kt-text-3); margin-top: 4px; }
+
+/* 侧栏里的剧集网格：面板窄，用 4 列 */
+.kt-prog .kt-epgrid { grid-template-columns: repeat(4, 1fr); }
+
+/* ===================== 搜索后展厅收起 ===================== */
+.kt-lounge.compact { grid-template-columns: 1fr; padding-top: 20px; }
+.kt-lounge.compact .kt-h1,
+.kt-lounge.compact .kt-lede,
+.kt-lounge.compact .kt-recent,
+.kt-lounge.compact .kt-board,
+.kt-lounge.compact .kt-eyebrow { display: none; }
+.kt-lounge.compact .kt-search { max-width: 560px; }
 
 /* ============================================================
    自适应：平板 ≤900 / 手机 ≤560
@@ -581,6 +615,7 @@
   .kt-prog-top h3 { font-size: 20px; }
   .kt-pick .bar { width: 44px; }
   .kt-pick .ms { width: 42px; }
+  .kt-prog .kt-epgrid { grid-template-columns: repeat(3, 1fr); }
 
   /* 放映厅单列 */
   .kt-hall { grid-template-columns: 1fr; gap: 14px; }

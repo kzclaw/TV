@@ -44,23 +44,23 @@ function buildSourceRows(items) {
 // 格式化速度显示（播放器页的「切换资源」与首页的多源弹窗共用同一套角标）
 function formatSpeedDisplay(speedResult) {
     if (speedResult.speed === -1) {
-        return `<span class="speed-indicator error">❌ ${speedResult.error}</span>`;
+        return `<span class="speed-indicator error"><i class="kt-dot" style="background:#C2603E"></i>${speedResult.error}</span>`;
     }
 
     const speed = speedResult.speed;
     let className = 'speed-indicator good';
-    let icon = '🟢';
+    let color = '#6FA88A';          // 健康
 
     if (speed > 2000) {
         className = 'speed-indicator poor';
-        icon = '🔴';
+        color = '#C2603E';           // 慢 / 不可用
     } else if (speed > 1000) {
         className = 'speed-indicator medium';
-        icon = '🟡';
+        color = '#FBBF24';           // 一般
     }
 
     const note = speedResult.note ? ` (${speedResult.note})` : '';
-    return `<span class="${className}">${icon} ${speed}ms${note}</span>`;
+    return `<span class="${className}"><i class="kt-dot" style="background:${color}"></i>${speed}ms${note}</span>`;
 }
 
 // UI相关函数

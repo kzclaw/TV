@@ -167,27 +167,13 @@ async function testSourcePickerSpeed(sourceKey, vodId, signal) {
 // 单个来源的卡片（与播放器页「切换资源」的卡片同款）
 function sourcePickerCardHtml(entry) {
     const key = sourcePickerEntryKey(entry);
-    const currentClass = entry.isCurrent ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-105 transition-transform';
+    const currentClass = entry.isCurrent ? 'current' : '';
+    // 侧栏只有 440px 宽 —— 用一行（源名 + 实测延迟）而不是海报网格
     return `
-        <div class="relative group ${currentClass}" data-source-key="${escapeText(key)}">
-            <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 relative">
-                <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt="${escapeText(entry.name)}"
-                     loading="lazy" class="w-full h-full object-cover">
-                <div class="absolute top-1 right-1 speed-badge bg-black bg-opacity-75" data-source-badge>
-                    <span class="speed-indicator">测速中</span>
-                </div>
-            </div>
-            <div class="mt-2">
-                <div class="text-xs font-medium text-gray-200 truncate">
-                    ${escapeText(entry.name)}${entry.approx ? ' <span class="text-yellow-500">近似</span>' : ''}
-                </div>
-                <div class="text-[10px] text-gray-400 truncate">${escapeText(entry.sourceName)}</div>
-                <div class="text-[10px] text-gray-500 mt-1" data-source-note></div>
-            </div>
-            ${entry.isCurrent ? `
-            <div class="absolute inset-0 flex items-center justify-center">
-                <div class="bg-blue-600 bg-opacity-75 rounded-lg px-2 py-0.5 text-xs text-white font-medium">当前播放</div>
-            </div>` : ''}
+        <div class="kt-pick ${currentClass}" data-source-key="${escapeText(key)}" role="button" tabindex="0"
+             title="${escapeText(entry.sourceName)}${entry.isCurrent ? '（当前播放）' : ''}">
+            <span class="nm">${escapeText(entry.name)}${entry.approx ? ' <span class="kt-src-badge approx">近似</span>' : ''}</span>
+            <span class="ms" data-source-badge><span class="speed-indicator">测速中</span></span>
         </div>`;
 }
 
@@ -301,15 +287,15 @@ function renderSourcePickerDetail() {
         : (entry.speed >= 0 ? `速度 ${entry.speed}ms` : `速度：${entry.error || '不可用'}`);
 
     detail.innerHTML = `
-        <div class="flex items-start gap-3 p-3 bg-[#1a1a1a] rounded-lg">
+        <div class="flex items-start gap-3 p-3 bg-[var(--kt-raised)] rounded-lg border border-[var(--kt-line)]">
             <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt=""
-                 class="w-16 aspect-[2/3] object-cover rounded shrink-0">
+                 class="w-14 aspect-[2/3] object-cover rounded shrink-0">
             <div class="flex-1 min-w-0">
                 <div class="text-sm font-semibold text-white truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
                 <div class="mt-1 text-xs text-gray-400">
                     ${escapeText(speedText)}${entry.episodes ? ` · ${entry.episodes} 集` : ''}
                 </div>
-                <button id="sourcePickerPlayBtn" class="mt-2 px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm">
+                <button id="sourcePickerPlayBtn" class="kt-btn pri mt-2">
                     播放此源
                 </button>
             </div>
@@ -353,9 +339,12 @@ function openSourcePicker(options) {
     sourcePickerState.selectedKey = '';
 
     if (title) title.innerHTML = `<span class="break-words">${escapeText(pickerTitle)}</span>`;
+    // 选源接管这个面板：把节目单底部的主操作清掉，别留着上一部片的「播放」
+    const cta = document.getElementById('modalCta');
+    if (cta) cta.innerHTML = '';
     content.innerHTML = `
         <div id="sourcePickerSummary" class="text-xs text-gray-400 mb-3">正在搜索其它来源...</div>
-        <div id="sourcePickerGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+        <div id="sourcePickerGrid" class="kt-pick-list"></div>
         <div id="sourcePickerDetail" class="mt-4"></div>`;
     modal.classList.remove('hidden');
 

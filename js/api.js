@@ -765,13 +765,9 @@ function renderLatestTags() {
     const addTag = (label, name) => {
         const btn = document.createElement('button');
 
-        let btnClass = 'py-1.5 px-3.5 rounded text-sm font-medium transition-all duration-300 border ';
-        if (name === latestCategory) {
-            btnClass += 'bg-pink-600 text-white shadow-md border-white';
-        } else {
-            btnClass += 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#333] hover:border-white';
-        }
-        btn.className = btnClass;
+        // 选中才上主色（原来是粉色选中 + 粉色 hover，和品牌色打架）
+        btn.className = 'kt-chip' + (name === latestCategory ? ' on' : '');
+        btn.setAttribute('aria-selected', name === latestCategory ? 'true' : 'false');
         btn.textContent = label;
 
         btn.addEventListener('click', () => {
@@ -851,7 +847,7 @@ function createLatestCard(group) {
                 // 选中后走现有的详情/播放流程（app.js 的 showDetails）
                 onPick: entry => {
                     if (typeof showDetails === 'function') {
-                        showDetails(entry.vodId, entry.name, entry.sourceKey);
+                        showDetails(entry.vodId, entry.name, entry.sourceKey, entry.pic || '');
                     }
                 }
             });
@@ -861,10 +857,10 @@ function createLatestCard(group) {
     };
 
     const card = document.createElement('div');
-    card.className = 'bg-[#111] hover:bg-[#222] transition-all duration-300 rounded-lg overflow-hidden flex flex-col transform hover:scale-105 shadow-md hover:shadow-lg';
+    card.className = 'kt-poster';
 
     const cover = document.createElement('div');
-    cover.className = 'relative w-full aspect-[2/3] overflow-hidden cursor-pointer';
+    cover.className = 'cover cursor-pointer';
     cover.addEventListener('click', activate);
 
     const img = document.createElement('img');
@@ -885,29 +881,32 @@ function createLatestCard(group) {
     cover.appendChild(img);
 
     const overlay = document.createElement('div');
-    overlay.className = 'absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60';
+    overlay.className = 'veil';
     cover.appendChild(overlay);
 
     if (time) {
         // 只有一个角标（右下角）：之前「X 个来源」也在左下角，两条一起会挤在一起互相压字
         const badge = document.createElement('div');
-        badge.className = 'absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded-sm whitespace-nowrap';
+        badge.className = 'kt-badge';
         badge.textContent = time;
         cover.appendChild(badge);
     }
 
     const info = document.createElement('div');
-    info.className = 'p-2 text-center bg-[#111]';
+    info.className = 'name';
+    info.title = title;
+    info.textContent = title;
+    info.addEventListener('click', activate);
 
-    const titleBtn = document.createElement('button');
-    titleBtn.className = 'text-sm font-medium text-white truncate w-full hover:text-pink-400 transition';
-    titleBtn.title = title;
-    titleBtn.textContent = title;
-    titleBtn.addEventListener('click', activate);
-    info.appendChild(titleBtn);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const typeName = group.typeName || (latest && latest.type_name) || '';
+    const year = group.year || (latest && latest.vod_year) || '';
+    meta.textContent = [typeName, year].filter(Boolean).join(' · ');
 
     card.appendChild(cover);
     card.appendChild(info);
+    if (meta.textContent) card.appendChild(meta);
 
     return card;
 }
@@ -977,6 +976,15 @@ async function loadLatestUpdates() {
         latestLoading = false;
     }
 }
+
+// 已通过密码门的用户不会再看到密码弹窗 → hidePasswordModal() 不会被调用，
+// 「最近更新」就永远不初始化（首页空着）。这里补一次初始化。
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof initLatestUpdates !== 'function') return;
+    if (window.isPasswordProtected && window.isPasswordVerified && window.isPasswordVerified()) {
+        initLatestUpdates();
+    }
+});
 
 // 初始化最近更新区块：开关状态 + 刷新按钮 + 自动加载
 function initLatestUpdates() {
