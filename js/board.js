@@ -36,7 +36,7 @@ function boardSelectedKeys() {
         keys = null;
     }
     if (!Array.isArray(keys) || !keys.length) {
-        keys = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
+        keys = DEFAULT_SOURCE_KEYS;   // 唯一真源在 config.js
     }
     return keys;
 }

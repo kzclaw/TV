@@ -4,6 +4,13 @@ const PROXY_URL = '/proxy/';    // 适用于 Cloudflare, Netlify (带重写), Ve
 const SEARCH_HISTORY_KEY = 'videoSearchHistory';
 const MAX_HISTORY_ITEMS = 5;
 
+// 默认启用的源（首次访问、还没在本地存过勾选时用）
+// 4 个都支持关键词搜索（tyyszy 是 listOnly，新用户实际只搜得到 3 个源）
+// ⚠ 这是「默认源」的唯一真源：js/app.js 的初始化与 js/api.js 的「最近更新」兜底都从这里取，
+// 两边各写一份会漂移 —— 曾经因为 api.js 直接读 localStorage（空）而兜底拉了全部 25 个源，
+// 新用户首屏因此打出 75 个代理请求。
+const DEFAULT_SOURCE_KEYS = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
+
 // 密码保护配置
 // 注意：PASSWORD 环境变量是必需的，所有部署都必须设置密码以确保安全
 const PASSWORD_CONFIG = {

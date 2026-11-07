@@ -1,6 +1,6 @@
 // 全局变量
-// 默认选中资源：4 个都支持关键词搜索（原来的 tyyszy 是 listOnly，新用户实际只搜得到 3 个源）
-let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '["dyttzy","bfzy","ruyi","ffzy"]');
+// 默认选中资源：默认清单在 config.js 的 DEFAULT_SOURCE_KEYS（唯一真源）
+let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || JSON.stringify(DEFAULT_SOURCE_KEYS));
 let customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
 
 // 添加当前播放的集数索引
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 设置默认API选择（如果是第一次加载）
     if (!localStorage.getItem('hasInitializedDefaults')) {
         // 默认选中资源（都要支持关键词搜索）
-        selectedAPIs = ["dyttzy", "bfzy", "ruyi", "ffzy"];
+        selectedAPIs = [...DEFAULT_SOURCE_KEYS];
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
 
         // 默认选中过滤开关

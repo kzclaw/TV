@@ -601,24 +601,11 @@ function abortLatestUpdates() {
 }
 
 // 当前勾选的源（与搜索口径一致）
-function getEnabledSourceKeys() {
-    let keys;
-    try {
-        keys = JSON.parse(localStorage.getItem('selectedAPIs') || 'null');
-    } catch (e) {
-        keys = null;
-    }
-    if (!Array.isArray(keys)) keys = [];
-    return keys.filter(key => API_SITES[key]);
-}
-
 // 最近更新：各源分页拉取最近 3 天的更新列表（不带关键词），合并后交给聚合层分组
 async function handleLatestUpdates() {
-    // 只拉「已启用」的源：24 个源全拉既慢又会占满连接池
-    const enabled = getEnabledSourceKeys();
-    const availableSources = enabled.length
-        ? enabled
-        : Object.keys(API_SITES).filter(key => key !== 'aggregated' && key !== 'custom');
+    // 「最近更新」覆盖**全部预设源**（不只是设置里勾选的那几个）——
+    // 它是聚合首页的主体内容，勾选只决定"搜索"的范围。
+    const availableSources = Object.keys(API_SITES).filter(key => key !== 'aggregated' && key !== 'custom');
 
     abortLatestUpdates();
     const controller = new AbortController();
@@ -626,27 +613,39 @@ async function handleLatestUpdates() {
     const signal = controller.signal;
 
     const resultsArray = [];
-    // 逐个源来（不并发）：一次最多占 3 个连接，其余留给用户的搜索
-    for (const source of availableSources) {
-        if (signal.aborted) break;
-        // 连续失败的源在跳过窗口内不再发请求
-        if (isSourceSkipped(source)) {
-            console.info(`${source}源连续失败，暂时跳过`);
-            resultsArray.push([]);
-            continue;
-        }
-
-        try {
-            const items = await collectLatestFromSource(source, signal);
-            markSourceSucceeded(source);
-            resultsArray.push(items);
-        } catch (error) {
+    // 限并发并行：25 个源**串行**拉要等好几分钟（每源最多 3 页、每页几秒），
+    // 用户看到的是"首页一直空着"。改成 6 个源一批 → 十几秒级填满。
+    // 上限 6 是留余量：用户的搜索请求要抢连接槽，不能被后台任务占满。
+    const LATEST_CONCURRENCY = 6;
+    let cursor = 0;
+    const worker = async () => {
+        while (cursor < availableSources.length) {
             if (signal.aborted) break;
-            console.warn(`${source}源获取最新更新失败:`, error);
-            markSourceFailed(source);
-            resultsArray.push([]);
+            const source = availableSources[cursor++];
+            // 连续失败的源在跳过窗口内不再发请求
+            if (isSourceSkipped(source)) {
+                console.info(`${source}源连续失败，暂时跳过`);
+                resultsArray.push([]);
+                continue;
+            }
+
+            try {
+                const items = await collectLatestFromSource(source, signal);
+                markSourceSucceeded(source);
+                resultsArray.push(items);
+            } catch (error) {
+                if (signal.aborted) break;
+                console.warn(`${source}源获取最新更新失败:`, error);
+                markSourceFailed(source);
+                resultsArray.push([]);
+            }
         }
+    };
+    const workers = [];
+    for (let i = 0; i < Math.min(LATEST_CONCURRENCY, availableSources.length); i++) {
+        workers.push(worker());
     }
+    await Promise.all(workers);
     if (latestAbortController === controller) latestAbortController = null;
 
     let allResults = [];
