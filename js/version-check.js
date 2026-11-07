@@ -104,7 +104,8 @@ function addVersionInfoToFooter() {
         
         // 创建版本信息元素
         const versionElement = document.createElement('p');
-        versionElement.className = 'text-gray-500 text-sm mt-1 text-center md:text-left';
+        versionElement.className = 'text-sm mt-1 text-center md:text-left';
+        versionElement.style.color = 'var(--kt-text-3)';
         
         // 添加当前版本信息
         versionElement.innerHTML = `版本: ${result.currentFormatted}`;
