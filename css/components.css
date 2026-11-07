@@ -573,7 +573,7 @@
   .kt-search-mini .tx { font-size: 12px; }
   .kt-search-mini kbd { display: none; }
   .kt-id { width: 30px; height: 30px; padding: 0; border-radius: 50%; justify-content: center; }
-  .kt-id .tx { display: none; }
+  .kt-id span { display: none; }   /* 手机只留金点 */
   .kt-id i { box-shadow: 0 0 0 2px rgba(224, 168, 75, .16); }
 
   .kt-lounge { padding: 26px 0 0; gap: 22px; }

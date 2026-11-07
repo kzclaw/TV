@@ -643,6 +643,9 @@ async function search() {
         return;
     }
 
+    // 后台的最近更新加载让路：它正占着本站的连接，会把搜索请求堵在队列里
+    if (typeof abortLatestUpdates === 'function') abortLatestUpdates();
+
     showLoading();
 
     try {

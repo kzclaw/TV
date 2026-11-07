@@ -528,7 +528,7 @@ async function handleSpecialSourceDetail(id, sourceCode, externalSignal) {
 // 采集单个源的最近更新：按 pg=1,2,3... 翻页，只留时间窗口（最近 3 天）内的条目。
 // 某一页里最旧的条目已早于窗口 → 该源到此为止（不用再翻后面的页）。
 // 同一批的页并发发出：上游单页要 0.5~3s，逐页串行会累加到十几秒，首页等不起。
-async function collectLatestFromSource(source) {
+async function collectLatestFromSource(source, signal) {
     const cutoff = Date.now() - LATEST_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     const base = API_SITES[source].api;
     const collected = [];
@@ -536,8 +536,9 @@ async function collectLatestFromSource(source) {
     for (let first = 1; first <= LATEST_MAX_PAGES_PER_SOURCE; first += LATEST_PAGE_BATCH) {
         const batch = [];
         for (let pg = first; pg < first + LATEST_PAGE_BATCH && pg <= LATEST_MAX_PAGES_PER_SOURCE; pg++) {
-            batch.push(fetchSourceData(`${base}?ac=videolist&pg=${pg}`, LATEST_PAGE_TIMEOUT_MS)
+            batch.push(fetchSourceData(`${base}?ac=videolist&pg=${pg}`, LATEST_PAGE_TIMEOUT_MS, signal)
                 .catch(error => {
+                    if (signal && signal.aborted) return null;
                     console.warn(`${source}源第 ${pg} 页获取失败:`, error);
                     return null;
                 }));
@@ -574,29 +575,65 @@ async function collectLatestFromSource(source) {
     return collected;
 }
 
+// 最近更新的在途请求：用户开始搜索时让路。
+// 背景加载若把浏览器到本站的连接占满，用户的搜索请求会排在队列里 —— 表现就是「点了搜索没反应」。
+let latestAbortController = null;
+
+function abortLatestUpdates() {
+    if (latestAbortController) {
+        try { latestAbortController.abort(); } catch (e) { /* 已经结束了 */ }
+        latestAbortController = null;
+    }
+}
+
+// 当前勾选的源（与搜索口径一致）
+function getEnabledSourceKeys() {
+    let keys;
+    try {
+        keys = JSON.parse(localStorage.getItem('selectedAPIs') || 'null');
+    } catch (e) {
+        keys = null;
+    }
+    if (!Array.isArray(keys)) keys = [];
+    return keys.filter(key => API_SITES[key]);
+}
+
 // 最近更新：各源分页拉取最近 3 天的更新列表（不带关键词），合并后交给聚合层分组
 async function handleLatestUpdates() {
-    const availableSources = Object.keys(API_SITES).filter(key =>
-        key !== 'aggregated' && key !== 'custom'
-    );
+    // 只拉「已启用」的源：24 个源全拉既慢又会占满连接池
+    const enabled = getEnabledSourceKeys();
+    const availableSources = enabled.length
+        ? enabled
+        : Object.keys(API_SITES).filter(key => key !== 'aggregated' && key !== 'custom');
 
-    const resultsArray = await Promise.all(availableSources.map(async (source) => {
+    abortLatestUpdates();
+    const controller = new AbortController();
+    latestAbortController = controller;
+    const signal = controller.signal;
+
+    const resultsArray = [];
+    // 逐个源来（不并发）：一次最多占 3 个连接，其余留给用户的搜索
+    for (const source of availableSources) {
+        if (signal.aborted) break;
         // 连续失败的源在跳过窗口内不再发请求
         if (isSourceSkipped(source)) {
             console.info(`${source}源连续失败，暂时跳过`);
-            return [];
+            resultsArray.push([]);
+            continue;
         }
 
         try {
-            const items = await collectLatestFromSource(source);
+            const items = await collectLatestFromSource(source, signal);
             markSourceSucceeded(source);
-            return items;
+            resultsArray.push(items);
         } catch (error) {
+            if (signal.aborted) break;
             console.warn(`${source}源获取最新更新失败:`, error);
             markSourceFailed(source);
-            return [];
+            resultsArray.push([]);
         }
-    }));
+    }
+    if (latestAbortController === controller) latestAbortController = null;
 
     let allResults = [];
     resultsArray.forEach(results => {
@@ -663,7 +700,7 @@ const LATEST_OTHER_CATEGORY = '其他';
 // 时间窗口：最近 3 天（vod_time 是本地时间字符串、无时区，按浏览器本地时区与当前时间比较）
 const LATEST_WINDOW_DAYS = 3;
 // 单源翻页硬上限：防止个别源刷不出头把请求量打爆
-const LATEST_MAX_PAGES_PER_SOURCE = 8;
+const LATEST_MAX_PAGES_PER_SOURCE = 3;
 // 每批发出的页数：同一批并发取，批内仍按页序处理（上游单页要 0.5~3s，逐页串行会累加到十几秒）
 const LATEST_PAGE_BATCH = 4;
 // 单页超时：上游单页 p99 约 3.2s。2.5s 时约四成页请求超时 → 对应源只能拿到第 1 页，
@@ -703,8 +740,9 @@ function updateLatestVisibility() {
     // 只有在开启且没有搜索结果显示时才显示最近更新区块
     if (isLatestEnabled() && !isSearching) {
         latestArea.classList.remove('hidden');
-        // 没有数据时自动加载一次
-        if (!latestItems.length) {
+        // 没有数据才重新拉；正在加载时不用重复拉 —— 加载完自己会渲染，
+        // 否则开关会被 latestLoading 挡成「点了没反应」
+        if (!latestItems.length && !latestLoading) {
             loadLatestUpdates();
         }
     } else {
@@ -783,6 +821,12 @@ function renderLatestTags() {
 
     addTag(LATEST_ALL_CATEGORY, LATEST_ALL_CATEGORY);
     getLatestCategories().forEach(name => addTag(name, name));
+}
+
+// 区块标题旁的加载状态提示（原来只在区块底部转圈，用户看不到）
+function setLatestState(text) {
+    const el = document.getElementById('latestState');
+    if (el) el.textContent = text || '';
 }
 
 // 按当前分类过滤已加载的分组
@@ -931,6 +975,7 @@ async function loadLatestUpdates() {
     // 密码门未验证时请求会被拦截（拿不到数据），等验证通过后 initLatestUpdates() 会重新触发
     if (window.isPasswordProtected && window.isPasswordProtected() && !window.isPasswordVerified()) return;
     latestLoading = true;
+    setLatestState('正在加载最近更新…');
 
     const container = document.getElementById('latest-results');
     if (container) {
@@ -962,8 +1007,12 @@ async function loadLatestUpdates() {
 
         renderLatestTags();
         renderLatestCards(filterLatestGroups());
+        setLatestState('');
+        // 数据到了就把区块亮出来（加载期间可能已被搜索结果顶掉）
+        updateLatestVisibility();
     } catch (error) {
         console.error('最近更新获取失败:', error);
+        setLatestState('加载失败，点「刷新」重试');
         if (container) {
             container.innerHTML = `
                 <div class="col-span-full text-center py-8">

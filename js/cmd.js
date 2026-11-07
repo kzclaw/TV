@@ -188,6 +188,15 @@ function cmdMove(delta) {
     els[cmdIndex].scrollIntoView({ block: 'nearest' });
 }
 
+// 顶栏的搜索框：点它应当能直接打字 —— 聚焦主搜索框（命令面板留给 ⌘K）
+function focusMainSearch() {
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+    input.focus();
+    try { input.select(); } catch (e) { /* 部分浏览器在隐藏时不支持 */ }
+    input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 function openCmd() {
     const panel = document.getElementById('ktCmd');
     if (!panel) return;
@@ -214,7 +223,7 @@ function cmdToggle() {
 
 document.addEventListener('DOMContentLoaded', function () {
     const openBtn = document.getElementById('openCmd');
-    if (openBtn) openBtn.addEventListener('click', openCmd);
+    if (openBtn) openBtn.addEventListener('click', focusMainSearch);
 
     const closeBtn = document.querySelector('#ktCmd .kt-icon-btn');
     if (closeBtn) closeBtn.addEventListener('click', closeCmd);
@@ -250,4 +259,4 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
-window.KzCmd = { open: openCmd, close: closeCmd };
+window.KzCmd = { open: openCmd, close: closeCmd, focusSearch: focusMainSearch };
