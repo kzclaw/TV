@@ -4,8 +4,8 @@
   "description": "KzTv 是一个免费的多源视频搜索与观看平台，聚合多个公开视频源，无需注册，打开即用。",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0f1622",
-  "theme_color": "#0f1622",
+  "background_color": "#0F0F11",
+  "theme_color": "#0F0F11",
   "apple-mobile-web-app-capable": "yes",
   "apple-mobile-web-app-status-bar-style": "black",
   "icons": [

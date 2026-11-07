@@ -1,0 +1,79 @@
+/* ============================================================
+   KzTv 设计令牌 · 暗房 Darkroom
+   ------------------------------------------------------------
+   唯一的设计事实来源：颜色、尺度、字体、动效全部在这里定一次。
+   组件类在 css/components.css，业务页不要出现裸色值。
+   ============================================================ */
+
+:root {
+  /* ---- 表面（从底到顶四层） ---- */
+  --kt-bg: #0A0A0B;        /* 放映厅底：页面背景 */
+  --kt-bg2: #0F0F11;       /* 面板底：抽屉 / 弹窗 / 顶栏 */
+  --kt-surface: #16161A;   /* 卡片面 */
+  --kt-raised: #1E1E23;    /* 抬升面：输入框 / 次要按钮 */
+
+  /* ---- 分隔线 ---- */
+  --kt-line: rgba(245, 241, 232, .10);
+  --kt-line-2: rgba(245, 241, 232, .20);
+
+  /* ---- 文本 ---- */
+  --kt-text: #F5F1E8;      /* 主文本，对 --kt-bg 对比度约 15.8:1 */
+  --kt-text-2: #A8A296;    /* 次文本，约 7.5:1 */
+  --kt-text-3: #6F6A62;    /* 弱文本 / 标签，约 4.6:1 */
+
+  /* ---- 唯一强调色：放映机灯 ---- */
+  --kt-brand: #E0A84B;
+  --kt-brand-2: #F0BC60;
+  --kt-brand-soft: rgba(224, 168, 75, .13);
+  --kt-brand-dim: rgba(224, 168, 75, .34);
+
+  /* ---- 语义色（只用于状态，不做装饰） ---- */
+  --kt-jade: #6FA88A;       /* 可用 / 健康 */
+  --kt-rust: #C2603E;       /* 不可用 / 失败 */
+  --kt-amber: #FBBF24;     /* 警告 / 源无响应 */
+
+  /* ---- 圆角 ---- */
+  --kt-r-sm: 8px;
+  --kt-r: 10px;
+  --kt-r-lg: 14px;
+  --kt-r-xl: 16px;
+
+  /* ---- 阴影（只两档：下沉 / 浮起，加弹层用第三档） ---- */
+  --kt-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+  --kt-shadow-lg: 0 16px 48px rgba(0, 0, 0, .5);
+  --kt-shadow-modal: 0 30px 80px rgba(0, 0, 0, .66);
+
+  /* ---- 尺度 ---- */
+  --kt-maxw: 1280px;
+  --kt-topbar-h: 60px;
+
+  /* ---- 字体 ----
+     不用 Google Fonts：国内网络不通 Google Fonts，加了等于给主用户断链。
+     标题走系统衬线（宋体系），正文走系统黑体，数字走等宽。
+     大标题（≥22px）用衬线，小字号一律黑体 —— 宋体在小字号下发糊。 */
+  --kt-font-serif: 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', 'SimSun', Georgia, serif;
+  --kt-font-sans: 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
+  --kt-font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* ---- 动效 ---- */
+  --kt-ease: cubic-bezier(.16, 1, .3, 1);
+  --kt-fast: .18s;
+  --kt-slow: .32s;
+}
+
+/* 焦点环：全站唯一一种，键盘用户必须看得见 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(224, 168, 75, .45);
+  border-radius: var(--kt-r-sm);
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

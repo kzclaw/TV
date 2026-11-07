@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
-  <rect width="512" height="512" rx="112" fill="#0f1622"/>
-  <path d="M256 116 L196 64 M256 116 L316 64" stroke="#00ccff" stroke-width="22" stroke-linecap="round"/>
-  <rect x="72" y="116" width="368" height="284" rx="38" stroke="#00ccff" stroke-width="24"/>
-  <rect x="114" y="158" width="284" height="200" rx="18" stroke="#00ccff" stroke-width="15" opacity="0.55"/>
-  <path d="M228 208 L228 308 L310 258 Z" fill="#ff3c78"/>
+  <!-- KzTv 标识（深色底版）：PWA / 安装图标用 -->
+  <rect width="512" height="512" rx="112" fill="#0F0F11"/>
+  <g stroke="#E0A84B" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 100 L194 44 M256 100 L318 44"/>
+    <rect x="52" y="100" width="408" height="306" rx="48"/>
+  </g>
+  <path d="M196 168 L196 338 L334 253 Z" fill="#E0A84B"/>
 </svg>
