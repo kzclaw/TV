@@ -18,16 +18,7 @@
     <link rel="apple-touch-icon" href="image/logo-black.png">
 </head>
 <body class="kt-page kt-grain">
-	<header class="border-b border-[var(--kt-line)] bg-[var(--kt-bg2)] p-4">
-        <div class="kt-shell flex items-center">
-            <div class="flex items-center">
-                <a href="/" class="kt-logo">
-                    <img src="image/logo-black.png" alt="KzTv Logo" class="w-8 h-8 mr-2 rounded-lg">
-                    <h1 class="text-xl font-bold gradient-text">KzTv</h1>
-                </a>
-            </div>
-        </div>
-	</header>
+	<div data-chrome="header"></div>
 
 	<main class="kt-main py-8 sm:py-12 px-4">
 		<div class="max-w-5xl mx-auto">
@@ -127,25 +118,19 @@
 		</div>
 	</main>
 
-	<footer class="border-t border-[var(--kt-line)] bg-[var(--kt-bg2)] p-4 mt-8">
-        <div class="kt-shell">
-            <div class="flex flex-col md:flex-row justify-between items-center gap-4">
-                <div class="flex items-center">
-                    <img src="image/logo-black.png" alt="KzTv Logo" class="w-8 h-8 mr-2 rounded-lg">
-                    <span class="gradient-text font-bold">KzTv</span>
-                </div>
-                <p class="text-[var(--kt-text-3)] text-sm mt-2 text-center md:text-left">© 2026 KzTv - 自由观影，畅享精彩</p>
-                <div class="flex items-center space-x-4">
-                    <p class="text-[var(--kt-text-3)] text-sm max-w-md">
-                        搜索结果来自第三方，本站不存储视频内容。
-                    </p>
-                    <nav class="flex space-x-4">
-                        <a href="/" class="text-gray-400 hover:text-white text-sm transition-colors">首页</a>
-                        <a href="about.html" class="text-gray-400 hover:text-white text-sm transition-colors">关于我们</a>
-                    </nav>
-                </div>
-            </div>
-        </div>
-	</footer>
+	<div data-chrome="panels"></div>
+
+	<div data-chrome="footer"></div>
+	<script>
+		// 环境变量注入（functions/_middleware.js 会把这一行替换成含 ACCESS_NAME 的版本）
+		window.__ENV__ = window.__ENV__ || {};
+		window.__ENV__.PASSWORD = "{{PASSWORD}}";
+	</script>
+	<script src="js/config.js"></script>
+	<script src="js/aggregate.js"></script>
+	<script src="js/ui.js"></script>
+	<script src="js/api.js"></script>
+	<script src="js/app.js"></script>
+	<script src="js/chrome.js"></script>
 </body>
 </html>

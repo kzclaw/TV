@@ -26,19 +26,7 @@
 </head>
 <body class="kt-page kt-grain">
 
-    <!-- ===================== 顶栏（只留标识） ===================== -->
-    <header class="kt-topbar player-header-fixed">
-        <button id="homeButton" type="button" class="kt-logo home-button" aria-label="返回首页" style="background:none;border:0;padding:0;cursor:pointer">
-            <svg class="kt-mark" viewBox="0 0 512 512" fill="none" aria-hidden="true">
-                <g stroke="currentColor" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M256 100 L194 44 M256 100 L318 44"/>
-                    <rect x="52" y="100" width="408" height="306" rx="48"/>
-                </g>
-                <path d="M196 168 L196 338 L334 253 Z" fill="currentColor"/>
-            </svg>
-            KzTv
-        </button>
-    </header>
+    <div data-chrome="header"></div>
 
     <!-- ===================== 放映厅 ===================== -->
     <main class="kt-main">
@@ -133,18 +121,10 @@
                 </aside>
             </div>
 
-            <footer class="footer">
-                <div class="kt-shell kt-foot">
-                    <div>
-                        <p class="text-gray-500 text-sm">© 2026 KzTv · 自由观影，畅享精彩</p>
-                    </div>
-                    <div>
-                        <a href="about.html">关于我们</a>
-                    </div>
-                </div>
-            </footer>
         </div>
     </main>
+
+    <div data-chrome="footer"></div>
 
     <!-- 快捷键提示 -->
     <div class="shortcut-hint" id="shortcutHint">
@@ -174,6 +154,8 @@
             </div>
         </div>
     </div>
+
+    <div data-chrome="panels"></div>
 
     <!-- ===================== 换源 / 选源面板（整屏遮罩，盖住播放器） ===================== -->
     <div id="modal" class="kt-overlay hidden" role="dialog" aria-modal="true" aria-label="选择播放源">
@@ -270,5 +252,6 @@
             });
         });
     </script>
+    <script src="js/chrome.js"></script>
 </body>
 </html>

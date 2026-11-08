@@ -502,12 +502,15 @@ function toggleSettings(e) {
 
 // 设置事件监听器
 function setupEventListeners() {
-    // 回车搜索
-    document.getElementById('searchInput').addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            search();
-        }
-    });
+    // 回车搜索（播放页没有搜索框 → 跳过，不能在这里抛错）
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                search();
+            }
+        });
+    }
 
     // 点击外部关闭设置面板和历史记录面板
     document.addEventListener('click', function (e) {
@@ -917,6 +920,7 @@ function clearSearchInput() {
 // 劫持搜索框的value属性以检测外部修改
 function hookInput() {
     const input = document.getElementById('searchInput');
+    if (!input) return;   // 关于页/播放页没有搜索框 → 直接跳过
     const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
 
     // 重写 value 属性的 getter 和 setter
