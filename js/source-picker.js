@@ -342,10 +342,11 @@ function openSourcePicker(options) {
     // 选源接管这个面板：把节目单底部的主操作清掉，别留着上一部片的「播放」
     const cta = document.getElementById('modalCta');
     if (cta) cta.innerHTML = '';
+    // 「播放此源」卡片放最上面 —— 之前在列表末尾，要一路拉到下面才看得到
     content.innerHTML = `
+        <div id="sourcePickerDetail" class="mb-4"></div>
         <div id="sourcePickerSummary" class="text-xs text-gray-400 mb-3">正在搜索其它来源...</div>
-        <div id="sourcePickerGrid" class="kt-pick-list"></div>
-        <div id="sourcePickerDetail" class="mt-4"></div>`;
+        <div id="sourcePickerGrid" class="kt-pick-list"></div>`;
     modal.classList.remove('hidden');
 
     const controller = new AbortController();

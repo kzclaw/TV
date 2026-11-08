@@ -26,7 +26,7 @@
 </head>
 <body class="kt-page kt-grain">
 
-    <!-- ===================== 顶栏 ===================== -->
+    <!-- ===================== 顶栏（只留标识） ===================== -->
     <header class="kt-topbar player-header-fixed">
         <button id="homeButton" type="button" class="kt-logo home-button" aria-label="返回首页" style="background:none;border:0;padding:0;cursor:pointer">
             <svg class="kt-mark" viewBox="0 0 512 512" fill="none" aria-hidden="true">
@@ -38,18 +38,22 @@
             </svg>
             KzTv
         </button>
-        <h2 id="videoTitle" class="text-lg font-semibold text-center flex-1 px-3 overflow-x-auto whitespace-nowrap truncate custom-title-scroll"></h2>
-        <a href="#" id="goBack" onclick="goBack(event)" class="kt-btn home-btn" aria-label="返回上一页">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M19 12H5M11 18l-6-6 6-6"/>
-            </svg>
-            <span class="home-btn-text">上一页</span>
-        </a>
     </header>
 
     <!-- ===================== 放映厅 ===================== -->
     <main class="kt-main">
         <div class="kt-shell">
+            <!-- 片名 + 返回：放在播放器上方（顶栏只留标识） -->
+            <div class="kt-player-head">
+                <h2 id="videoTitle"></h2>
+                <a href="#" id="goBack" onclick="goBack(event)" class="kt-btn home-btn" aria-label="返回">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M19 12H5M11 18l-6-6 6-6"/>
+                    </svg>
+                    <span class="home-btn-text">返回</span>
+                </a>
+            </div>
+
             <div class="kt-hall">
 
                 <div>
@@ -78,15 +82,15 @@
                     <!-- 剧集条 -->
                     <div class="kt-hall-foot">
                         <span class="lb">剧集</span>
-                        <span id="episodeInfo" class="text-sm text-gray-400 mr-4">加载中...</span>
-                        <div class="episode-grid" id="episodesGrid" style="flex:1;max-height:none;overflow:visible">
+                        <span id="episodeInfo" class="text-sm text-gray-400">加载中...</span>
+                        <div class="episode-grid" id="episodesGrid" style="flex:1;min-width:0;max-height:none;overflow:visible">
                             <div class="kt-epgrid" id="episodesList"></div>
                         </div>
-                        <div class="kt-keys">
-                            <span><kbd>←</kbd><kbd>→</kbd>切集</span>
-                            <span><kbd>空格</kbd>播放</span>
-                            <span><kbd>H</kbd>隐藏界面</span>
-                        </div>
+                    </div>
+                    <div class="kt-keys">
+                        <span><kbd>←</kbd><kbd>→</kbd>切集</span>
+                        <span><kbd>空格</kbd>播放</span>
+                        <span><kbd>H</kbd>隐藏界面</span>
                     </div>
                 </div>
 
@@ -171,21 +175,23 @@
         </div>
     </div>
 
-    <!-- ===================== 换源 / 选源面板 ===================== -->
-    <div id="modal" class="kt-prog hidden" aria-label="选择播放源">
-        <div class="kt-prog-head">
-            <span class="t">选择片源</span>
-            <button onclick="closeModal()" class="kt-icon-btn" type="button" aria-label="关闭">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/>
-                </svg>
-            </button>
+    <!-- ===================== 换源 / 选源面板（整屏遮罩，盖住播放器） ===================== -->
+    <div id="modal" class="kt-overlay hidden" role="dialog" aria-modal="true" aria-label="选择播放源">
+        <div class="kt-overlay-panel">
+            <div class="kt-prog-head">
+                <span class="t">选择片源</span>
+                <button onclick="closeModal()" class="kt-icon-btn" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="kt-prog-body">
+                <div id="modalTitle"></div>
+                <div id="modalContent"></div>
+            </div>
+            <div class="kt-prog-cta" id="modalCta"></div>
         </div>
-        <div class="kt-prog-body">
-            <div id="modalTitle"></div>
-            <div id="modalContent"></div>
-        </div>
-        <div class="kt-prog-cta" id="modalCta"></div>
     </div>
 
     <!-- ===================== 提示 / 加载 ===================== -->
