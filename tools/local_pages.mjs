@@ -36,7 +36,8 @@ const { onRequest: middleware } = await import(pathToFileURL(join(ROOT, 'functio
 const { onRequest: authEndpoint } = await import(pathToFileURL(join(ROOT, 'functions/auth.js')).href);
 const { onRequest: proxyHandler, validateAuth } = await import(pathToFileURL(join(ROOT, 'functions/proxy/[[path]].js')).href);
 
-const env = { PASSWORD, LIBRETV_PROXY_KV: null };
+// KV 由代理自己从 env 里取，取不到就降级成「不缓存」——这里不用管
+const env = { PASSWORD };
 
 function baseUrl(req) {
     // 真实 Pages 前面是 TLS，request.url 是 https —— 这里要还原同样的 scheme，

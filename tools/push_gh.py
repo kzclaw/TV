@@ -89,7 +89,13 @@ for p in sorted(changed):
     })
     mode = '100755' if os.access(work_files[p], os.X_OK) else '100644'
     tree_entries.append({'path': p, 'mode': mode, 'type': 'blob', 'sha': blob['sha']})
+# 删除只对「远端树上真实存在」的路径发 —— 对不存在的路径再发一次删除会 422 BadObjectState
+remote_tree = api('GET', f'/git/trees/{base_tree}?recursive=1')
+remote_paths = {e['path'] for e in remote_tree.get('tree', []) if e['type'] == 'blob'}
 for p in sorted(deleted):
+    if p not in remote_paths:
+        print(f'  跳过删除（远端已不存在）: {p}')
+        continue
     tree_entries.append({'path': p, 'mode': '100644', 'type': 'blob', 'sha': None})
 
 new_tree = api('POST', '/git/trees', {'base_tree': base_tree, 'tree': tree_entries})
@@ -111,6 +117,8 @@ for p in sorted(changed):
     if remote['sha'] != local_sha:
         bad.append(p)
 for p in sorted(deleted):
+    if p not in remote_paths:
+        continue
     try:
         api('GET', f'/contents/{urllib.parse.quote(p)}?ref={new_commit["sha"]}')
         bad.append(p + ' (应该已删除但还在)')
