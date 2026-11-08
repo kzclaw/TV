@@ -273,7 +273,8 @@ function selectSourcePickerEntry(key, triggerPlay) {
 
 // 选中源的详情与播放入口
 function renderSourcePickerDetail() {
-    const detail = document.getElementById('sourcePickerDetail');
+    const detail = document.getElementById('sourcePickerDetail')
+        || document.getElementById('sourcePickerTop');
     if (!detail) return;
 
     const entry = sourcePickerState.entries.find(item => sourcePickerEntryKey(item) === sourcePickerState.selectedKey);
@@ -343,8 +344,13 @@ function openSourcePicker(options) {
     const cta = document.getElementById('modalCta');
     if (cta) cta.innerHTML = '';
     // 「播放此源」卡片放最上面 —— 之前在列表末尾，要一路拉到下面才看得到
+    // 播放此源卡片：优先放进面板顶部的固定槽（不随源列表滚动），
+    // 没有固定槽的页面才退回内容区顶部。
+    const topSlot = document.getElementById('sourcePickerTop');
+    if (topSlot) topSlot.innerHTML = '';
+
     content.innerHTML = `
-        <div id="sourcePickerDetail" class="mb-4"></div>
+        ${topSlot ? '' : '<div id="sourcePickerDetail" class="mb-4"></div>'}
         <div id="sourcePickerSummary" class="text-xs text-gray-400 mb-3">正在搜索其它来源...</div>
         <div id="sourcePickerGrid" class="kt-pick-list"></div>`;
     modal.classList.remove('hidden');

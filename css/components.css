@@ -235,7 +235,7 @@
   padding-bottom: 4px;
 }
 .kt-row .kt-poster { width: auto; }
-.kt-more { display: flex; justify-content: center; margin-top: 18px; }
+.kt-more { display: flex; justify-content: center; margin: 18px 0 28px; }
 
 /* 状态板底部的说明文字：点一下展开/收起全部源 */
 .kt-board-foot .kb-toggle {
@@ -446,9 +446,13 @@
   display: flex; flex-direction: column; overflow: hidden;
 }
 
+/* 选源面板顶部的固定槽（播放此源卡片） */
+#sourcePickerTop:empty { display: none; }
+#sourcePickerTop:not(:empty) { padding: 14px 20px 0; border-bottom: 1px solid var(--kt-line); }
+
 /* 播放器下方：快捷键（居中） → 剧集标题 → 数字按钮独占一行 */
 .kt-player-sub { margin-top: 14px; }
-.kt-hall-foot { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.kt-hall-foot { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .kt-epgrid { margin-top: 0; }
 
 /* 右侧「播放控制」卡：组之间留呼吸，自动连播在最下面 */
@@ -571,7 +575,7 @@
 /* ===================== 页脚 ===================== */
 .kt-foot {
   flex: none;              /* 同理，页脚也不许被挤 */
-  border-top: 1px solid var(--kt-line); margin-top: 26px; padding: 16px 0 26px;
+  border-top: 1px solid var(--kt-line); margin-top: 26px; padding: 16px 20px 26px;
   color: var(--kt-text-3); font-size: 11.5px;
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
