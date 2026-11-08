@@ -67,18 +67,20 @@
                         </div>
                     </div>
 
-                    <!-- 剧集条 -->
-                    <div class="kt-hall-foot">
-                        <span class="lb">剧集</span>
-                        <span id="episodeInfo" class="text-sm text-gray-400">加载中...</span>
-                        <div class="episode-grid" id="episodesGrid" style="flex:1;min-width:0;max-height:none;overflow:visible">
+                    <!-- 播放器下方：快捷键（居中） → 剧集标题 → 数字按钮独占一行 -->
+                    <div class="kt-player-sub">
+                        <div class="kt-keys">
+                            <span><kbd>←</kbd><kbd>→</kbd>切集</span>
+                            <span><kbd>空格</kbd>播放</span>
+                            <span><kbd>H</kbd>隐藏界面</span>
+                        </div>
+                        <div class="kt-hall-foot">
+                            <span class="lb">剧集</span>
+                            <span id="episodeInfo" class="text-sm text-gray-400">加载中...</span>
+                        </div>
+                        <div class="episode-grid" id="episodesGrid" style="max-height:none;overflow:visible">
                             <div class="kt-epgrid" id="episodesList"></div>
                         </div>
-                    </div>
-                    <div class="kt-keys">
-                        <span><kbd>←</kbd><kbd>→</kbd>切集</span>
-                        <span><kbd>空格</kbd>播放</span>
-                        <span><kbd>H</kbd>隐藏界面</span>
                     </div>
                 </div>
 
@@ -88,14 +90,6 @@
                     <div id="resourceInfoBarContainer" class="player-container flex justify-between py-2 px-3 mb-3"></div>
 
                     <div class="flex flex-wrap gap-2">
-                        <label class="switch" style="margin:0">
-                            <input type="checkbox" id="autoplayToggle">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="text-xs text-gray-400 self-center">自动连播</span>
-                    </div>
-
-                    <div class="flex flex-wrap gap-2 mt-3">
                         <button onclick="toggleEpisodeOrder()" class="kt-btn" style="height:32px" title="倒序排列">
                             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" id="orderIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 002.414 0L11 10.586V7z" clip-rule="evenodd"/>
@@ -114,9 +108,18 @@
                         </button>
                     </div>
 
-                    <div class="flex gap-2 mt-4">
+                    <div class="flex gap-2 mt-3">
                         <button onclick="playPreviousEpisode()" id="prevButton" class="kt-btn" style="flex:1">上一集</button>
                         <button onclick="playNextEpisode()" id="nextButton" class="kt-btn" style="flex:1">下一集</button>
+                    </div>
+
+                    <!-- 自动连播：放在卡片最下面 -->
+                    <div class="kt-rail-auto">
+                        <label class="switch" style="margin:0">
+                            <input type="checkbox" id="autoplayToggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="text-xs text-gray-400">自动连播</span>
                     </div>
                 </aside>
             </div>

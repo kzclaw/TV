@@ -22,6 +22,7 @@
 
 /* ===================== 顶栏 ===================== */
 .kt-topbar {
+  flex: none;              /* body 是 flex 纵向列：顶栏不许被挤扁 */
   height: var(--kt-topbar-h);
   display: flex; align-items: center; gap: 18px;
   padding: 0 20px;
@@ -410,7 +411,7 @@
 .kt-hall-foot .lb {
   font-family: var(--kt-font-mono); font-size: 10.5px; letter-spacing: .16em; color: var(--kt-text-3);
 }
-.kt-keys { display: flex; gap: 16px; margin-left: auto; font-size: 11px; color: var(--kt-text-3); }
+.kt-keys { display: flex; justify-content: center; gap: 20px; font-size: 11px; color: var(--kt-text-3); }
 .kt-keys kbd {
   font-family: var(--kt-font-mono); border: 1px solid var(--kt-line);
   border-radius: 4px; padding: 1px 5px; margin-right: 5px; color: var(--kt-text-2);
@@ -423,7 +424,7 @@
 /* ===================== 放映厅补充 ===================== */
 
 /* 片名 + 返回：放在播放器上方 */
-.kt-player-head { display: flex; align-items: center; gap: 14px; padding: 16px 0 14px; }
+.kt-player-head { display: flex; align-items: center; gap: 14px; padding: 22px 0 16px; }
 .kt-player-head h2 {
   flex: 1; min-width: 0; font-family: var(--kt-font-serif); font-size: 20px;
   font-weight: 600; color: var(--kt-text); margin: 0;
@@ -445,9 +446,17 @@
   display: flex; flex-direction: column; overflow: hidden;
 }
 
-/* 剧集行：允许换行；快捷键提示单独一行，不再跟按钮挤在一起 */
-.kt-hall-foot { flex-wrap: wrap; row-gap: 10px; }
-.kt-keys { margin-left: auto; }
+/* 播放器下方：快捷键（居中） → 剧集标题 → 数字按钮独占一行 */
+.kt-player-sub { margin-top: 14px; }
+.kt-hall-foot { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.kt-epgrid { margin-top: 0; }
+
+/* 右侧「播放控制」卡：组之间留呼吸，自动连播在最下面 */
+.kt-rail > * + * { margin-top: 12px; }
+.kt-rail-auto {
+  display: flex; align-items: center; gap: 9px;
+  padding-top: 12px; border-top: 1px solid var(--kt-line);
+}
 
 /* 窄栏里的资源条：源名一行、「切换资源」另起一行 */
 .kt-rail #resourceInfoBarContainer { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -561,6 +570,7 @@
 
 /* ===================== 页脚 ===================== */
 .kt-foot {
+  flex: none;              /* 同理，页脚也不许被挤 */
   border-top: 1px solid var(--kt-line); margin-top: 26px; padding: 16px 0 26px;
   color: var(--kt-text-3); font-size: 11.5px;
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
@@ -684,7 +694,7 @@
   .kt-hall { grid-template-columns: 1fr; gap: 14px; }
   .kt-player-head { padding: 12px 0 10px; }
   .kt-player-head h2 { font-size: 17px; }
-  .kt-keys { margin-left: 0; }
+
   .kt-hall-foot { flex-wrap: wrap; gap: 10px; }
   .kt-keys { display: none; }
   .kt-epgrid { grid-template-columns: repeat(4, 1fr); }

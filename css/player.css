@@ -8,7 +8,7 @@ body, html {
   margin: 0; padding: 0; width: 100%; height: 100%;
   background-color: var(--kt-bg);
   color: var(--kt-text);
-  padding-top: 60px;
+  /* 顶栏改成 sticky 后自己就占位了，这儿再留 60px 会多出一段空白 */
 }
 
 /* 顶栏 */
