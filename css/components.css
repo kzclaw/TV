@@ -226,8 +226,23 @@
 .kt-strip-head .ln { flex: 1; height: 1px; background: var(--kt-line); }
 .kt-strip-head .hint { font-size: 11.5px; color: var(--kt-text-3); min-width: 0; }
 
-.kt-row { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
-.kt-row::-webkit-scrollbar { display: none; }
+/* 最近更新：多行网格，海报放大，页面整体向下滚（不再单行横滑） */
+.kt-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 24px 16px;
+  padding-bottom: 4px;
+}
+.kt-row .kt-poster { width: auto; }
+.kt-more { display: flex; justify-content: center; margin-top: 18px; }
+
+/* 状态板底部的说明文字：点一下展开/收起全部源 */
+.kt-board-foot .kb-toggle {
+  background: none; border: 0; padding: 0; margin: 0;
+  color: var(--kt-text-3); font-family: inherit; font-size: 11.5px;
+  cursor: pointer; text-align: left; transition: color var(--kt-fast);
+}
+.kt-board-foot .kb-toggle:hover { color: var(--kt-brand); }
 
 .kt-poster { width: 126px; flex: none; cursor: pointer; }
 .kt-poster .cover {
@@ -512,6 +527,7 @@
   color: var(--kt-text-3); font-size: 11.5px;
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
+.footer .kt-foot { border-top: 0; margin-top: 0; }   /* 边框已由 .footer 画了 */
 .kt-foot a { color: var(--kt-text-2); text-decoration: none; margin-left: 16px; }
 .kt-foot a:hover { color: var(--kt-brand); }
 
@@ -598,6 +614,7 @@
   .kt-board-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
 
   .kt-strip { margin-top: 32px; }
+  .kt-row { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 18px 10px; }
   .kt-strip-head { flex-wrap: wrap; gap: 8px 10px; }
   .kt-strip-head .ln { display: none; }
   .kt-strip-head .hint { order: 3; flex: 1 1 100%; }

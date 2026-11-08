@@ -227,7 +227,7 @@
                     </div>
                     <div class="kt-src-list" id="ktSrcList"></div>
                     <div class="kt-board-foot">
-                        <span id="ktBoardFoot">正在读取…</span>
+                        <button id="ktBoardFoot" class="kb-toggle" type="button" aria-expanded="false">正在读取…</button>
                         <button id="ktBoardProbe" type="button">重新测速</button>
                     </div>
                 </aside>
@@ -247,6 +247,7 @@
                 </div>
                 <div class="kt-hot" id="latest-tags" style="display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 16px"></div>
                 <div class="kt-row" id="latest-results"></div>
+                <div class="kt-more" id="latestMore"></div>
             </section>
 
             <!-- 搜索结果 -->
@@ -269,14 +270,15 @@
     </main>
 
     <!-- ===================== 页脚 ===================== -->
-    <footer class="footer kt-foot kt-shell">
-        <div>
-            <p class="text-gray-500 text-sm">© 2026 KzTv · 自由观影，畅享精彩</p>
-        </div>
-        <div>
-            <a href="about.html">关于我们</a>
-            <a href="about.html">隐私政策</a>
-            <a href="https://www.msf.hk/zh-hant/donate/general?type=one-off" target="_blank" rel="noopener">捐赠</a>
+    <footer class="footer">
+        <div class="kt-shell kt-foot">
+            <div>
+                <p class="text-gray-500 text-sm">© 2026 KzTv · 自由观影，畅享精彩</p>
+            </div>
+            <div>
+                <a href="about.html">关于我们</a>
+                <a href="about.html">隐私政策</a>
+            </div>
         </div>
     </footer>
 

@@ -292,13 +292,17 @@ function renderSearchHistory() {
         return;
     }
 
-    // 创建一个包含标题和清除按钮的行
+    // 标题 + 垃圾桶图标（放在标题后面，不再单独占一行）
     historyContainer.innerHTML = `
-        <div class="flex justify-between items-center w-full mb-2">
-            <div class="text-gray-500">最近搜索:</div>
-            <button id="clearHistoryBtn" class="text-gray-500 hover:text-white transition-colors"
-                    onclick="clearSearchHistory()" aria-label="清除搜索历史">
-                清除搜索历史
+        <div class="flex items-center gap-2 w-full mb-2">
+            <span class="text-gray-500">最近搜索:</span>
+            <button id="clearHistoryBtn" class="kt-icon-btn" style="width:24px;height:24px;border:0"
+                    onclick="clearSearchHistory()" aria-label="清除搜索历史" title="清除搜索历史">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
             </button>
         </div>
     `;

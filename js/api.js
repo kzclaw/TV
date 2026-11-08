@@ -824,6 +824,7 @@ function renderLatestTags() {
         btn.addEventListener('click', () => {
             if (latestCategory === name) return;
             latestCategory = name;
+            latestShown = LATEST_PAGE_SIZE;   // 换分类回到第一屏
             renderLatestTags();
             // 只重绘网格，不重新拉数据
             renderLatestCards(filterLatestGroups());
@@ -866,6 +867,10 @@ function buildLatestGroups(items) {
 }
 
 // 渲染最近更新卡片
+// 最近更新一屏放多少张（剩下的点「显示更多」继续加）
+const LATEST_PAGE_SIZE = 24;
+let latestShown = LATEST_PAGE_SIZE;
+
 function renderLatestCards(groups) {
     const container = document.getElementById('latest-results');
     if (!container) return;
@@ -875,14 +880,29 @@ function renderLatestCards(groups) {
     if (!groups || groups.length === 0) {
         const emptyEl = document.createElement('div');
         emptyEl.className = 'col-span-full text-center py-8';
-        emptyEl.innerHTML = '<div class="text-pink-500">❌ 暂无数据，请稍后重试</div>';
+        emptyEl.innerHTML = '<div style="color:var(--kt-rust)">暂无数据，请稍后重试</div>';
         fragment.appendChild(emptyEl);
     } else {
-        groups.forEach(group => fragment.appendChild(createLatestCard(group)));
+        groups.slice(0, latestShown).forEach(group => fragment.appendChild(createLatestCard(group)));
     }
 
     container.innerHTML = '';
     container.appendChild(fragment);
+
+    // 「显示更多」
+    const more = document.getElementById('latestMore');
+    if (more) {
+        const left = (groups ? groups.length : 0) - latestShown;
+        more.innerHTML = left > 0
+            ? '<button class="kt-btn" type="button" onclick="showMoreLatest()">显示更多（还有 ' + left + ' 部）</button>'
+            : '';
+    }
+}
+
+// 「显示更多」：一次再加一屏
+function showMoreLatest() {
+    latestShown += LATEST_PAGE_SIZE;
+    renderLatestCards(filterLatestGroups());
 }
 
 // 构造单张卡片（动态文本全部走 textContent，避免 XSS / 破版）

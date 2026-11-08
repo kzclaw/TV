@@ -56,6 +56,10 @@ function boardSaveProbeCache(cache) {
     } catch (e) { /* 隐私模式下写不了，忽略 */ }
 }
 
+// 首屏只列最快的几个（开满 25 个源时列表会拖到屏幕外），其余点一下展开
+const BOARD_TOP_N = 5;
+let boardExpanded = false;
+
 // 渲染状态板
 function renderSourceBoard() {
     const list = document.getElementById('ktSrcList');
@@ -70,50 +74,57 @@ function renderSourceBoard() {
 
     list.innerHTML = '';
 
-    // 只列「已启用」的源 —— 24 个源全列会把首屏撑爆（真正会用的通常只有 4~8 个）
-    Object.keys(sites).filter(function (key) {
-        return selected.indexOf(key) !== -1;
-    }).forEach(function (key) {
+    // 只列「已启用」的源，并按实测速度排序：最快的排前面
+    const entries = [];
+    Object.keys(sites).forEach(function (key) {
+        if (selected.indexOf(key) === -1) return;
+
         const site = sites[key];
         const name = site.name || key;
-        const isOn = true;
         const isListOnly = !!site.listOnly;
         const isSkipped = skipped.indexOf(key) !== -1;
         const probe = cache[key];
 
-        const row = document.createElement('div');
-        row.className = 'kt-src' + (!isOn || isListOnly || isSkipped ? ' off' : '');
-
-        let dotColor = '#6F6A62';   // 弱文本：未启用 / 仅列表
+        let dotColor = '#6F6A62';   // 弱文本：仅列表 / 探测中
         let barWidth = 0;
-        let msText = '未启用';
+        let msText = '仅列表';
+        let sortKey = 9000;         // 排最后
 
         if (isListOnly) {
             msText = '仅列表';
         } else if (isSkipped) {
-            dotColor = '#C2603E';   // 不可用
+            dotColor = '#C2603E';
             msText = '已跳过';
-        } else if (!isOn) {
-            msText = '未启用';
         } else if (probe && probe.ok) {
             dotColor = '#6FA88A';   // 健康
             const ratio = Math.max(0, Math.min(1, (1200 - probe.ms) / 1140));
             barWidth = Math.round(8 + ratio * 92);
             msText = probe.ms + ' ms';
+            sortKey = probe.ms;      // 越快越靠前
         } else if (probe && !probe.ok) {
             dotColor = '#C2603E';
             msText = '超时';
         } else {
             dotColor = '#FBBF24';   // 探测中
             msText = '探测中';
+            sortKey = 5000;
         }
 
-        row.innerHTML =
-            '<span class="nm"><i class="kt-dot" style="background:' + dotColor + '"></i><em>' +
-            escapeText(name) + '</em></span>' +
-            '<span class="bar"><i style="width:' + barWidth + '%"></i></span>' +
-            '<span class="ms">' + escapeText(msText) + '</span>';
+        entries.push({ name: name, dotColor: dotColor, barWidth: barWidth, msText: msText,
+                       off: isListOnly || isSkipped, sortKey: sortKey });
+    });
 
+    entries.sort(function (a, b) { return a.sortKey - b.sortKey; });
+
+    const shown = boardExpanded ? entries : entries.slice(0, BOARD_TOP_N);
+    shown.forEach(function (e) {
+        const row = document.createElement('div');
+        row.className = 'kt-src' + (e.off ? ' off' : '');
+        row.innerHTML =
+            '<span class="nm"><i class="kt-dot" style="background:' + e.dotColor + '"></i><em>' +
+            escapeText(e.name) + '</em></span>' +
+            '<span class="bar"><i style="width:' + e.barWidth + '%"></i></span>' +
+            '<span class="ms">' + escapeText(e.msText) + '</span>';
         list.appendChild(row);
     });
 
@@ -121,7 +132,11 @@ function renderSourceBoard() {
         const total = Object.keys(sites).length;
         const on = selected.length;
         const listOnly = Object.keys(sites).filter(function (k) { return sites[k].listOnly; }).length;
-        foot.textContent = '已启用 ' + on + ' / ' + total + ' 个源' + (listOnly ? ' · ' + listOnly + ' 个仅列表' : '');
+        const more = entries.length > BOARD_TOP_N;
+        foot.textContent = '已启用 ' + on + ' / ' + total + ' 个源'
+            + (listOnly ? ' · ' + listOnly + ' 个仅列表' : '')
+            + (more ? ' · ' + (boardExpanded ? '全部显示 ▴' : '显示最快的 ' + BOARD_TOP_N + ' 个 ▾') : '');
+        foot.setAttribute('aria-expanded', boardExpanded ? 'true' : 'false');
     }
 }
 
@@ -203,6 +218,15 @@ function initSourceBoard() {
     const probeBtn = document.getElementById('ktBoardProbe');
     if (probeBtn) {
         probeBtn.addEventListener('click', function () { probeSources(true); });
+    }
+
+    // 底部那行文字点一下就展开/收起全部源
+    const footBtn = document.getElementById('ktBoardFoot');
+    if (footBtn) {
+        footBtn.addEventListener('click', function () {
+            boardExpanded = !boardExpanded;
+            renderSourceBoard();
+        });
     }
 
     // 首次进页面探一次；之后 60 秒内不重复

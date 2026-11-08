@@ -254,6 +254,7 @@ body {
 #addCustomApiForm:not(.hidden) { max-height: 230px; opacity: 1; }
 
 /* ===================== 页脚 ===================== */
+/* 页脚：整宽底 + 内容居中（.kt-shell 约束宽度，避免宽屏上被拉到两边） */
 .footer {
   width: 100%; transition: all var(--kt-slow) var(--kt-ease);
   margin-top: auto; background: var(--kt-bg);
