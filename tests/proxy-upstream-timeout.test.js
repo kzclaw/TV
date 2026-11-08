@@ -71,7 +71,7 @@ globalThis.fetch = fakeFetch;
 
 (async () => {
     const proxy = await import(pathToFileURL(tmpModule).href);
-    const { onRequest, buildUpstreamSignal, isJsonPayload } = proxy;
+    const { onRequest, buildUpstreamSignal, isJsonPayload, DEFAULT_UPSTREAM_TIMEOUT_MS } = proxy;
 
     const PASSWORD = 'c15-self-test-password';
     const authHash = crypto.createHash('sha256').update(PASSWORD).digest('hex');
@@ -102,6 +102,12 @@ globalThis.fetch = fakeFetch;
         await new Promise(r => setTimeout(r, 250));
         assert.equal(only.aborted, true, '超过超时预算后信号应中止');
     }
+
+    // 断言 0（回归防护）：默认出网死线必须大于客户端最长的死线（搜索单源 10s）
+    // —— 代理是兜底不是抢占者：死线比客户端短会把「本来能答完」的源掐成失败
+    //    （实测：8s 死线把 3/4 个默认源掐成「没响应」，搜不到结果）。
+    assert.ok(DEFAULT_UPSTREAM_TIMEOUT_MS > 10000,
+        `默认出网死线应大于客户端搜索死线 10s，实际 ${DEFAULT_UPSTREAM_TIMEOUT_MS}ms`);
 
     // 断言 1 + 2：源站挂住 → 有界时间内失败，且出网请求确实带了 signal
     {

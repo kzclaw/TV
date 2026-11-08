@@ -48,6 +48,9 @@ const DOH_TIMEOUT_MS = 3000;
 // 模块级 DNS 缓存：host -> { at, ttl, ips, error }
 const dnsCache = new Map();
 
+// 出网硬超时的默认值（毫秒）。必须大于客户端最长的死线（搜索单源 10s）——见 onRequest 里的说明。
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 12000;
+
 // JSON 响应在浏览器 / KV 里的缓存时长（秒）。
 // 搜索结果与「最近更新」必须新鲜 —— 之前 JSON 被判成非 JSON 时落到了 24h 分支，
 // 结果同一个关键词一天之内搜出来的都是旧数据。
@@ -395,9 +398,12 @@ export async function onRequest(context) {
     const CACHE_TTL = parseInt(env.CACHE_TTL || '86400'); // 默认 24 小时
     const MAX_RECURSION = parseInt(env.MAX_RECURSION || '5'); // 默认 5 层
     // 出网硬超时（毫秒）：源站挂住时代理不能无限等。
-    // 取 8s：短于搜索的单源死线（10s），让服务端先收尾并给出明确状态，
-    // 而不是客户端放弃后服务端还占着连接。
-    const UPSTREAM_TIMEOUT_MS = parseInt(env.UPSTREAM_TIMEOUT_MS || '8000');
+    // ⚠ 取值必须**大于客户端最长的那个死线**（搜索单源 10s / 探针 8s / 最近更新单页 3s）：
+    //   代理是兜底，不是抢占者 —— 死线比客户端短的话，源站本来能在 9~10s 答完，
+    //   会被代理先掐成 500，用户看到的是「这个源没响应」而不是结果。
+    //   客户端先放弃才是设计意图（搜索会提示「没响应」、后台任务会被中止）；
+    //   代理只负责保证「不无限挂、不泄漏连接」。
+    const UPSTREAM_TIMEOUT_MS = parseInt(env.UPSTREAM_TIMEOUT_MS || String(DEFAULT_UPSTREAM_TIMEOUT_MS));
     // 广告过滤已移至播放器处理，代理不再执行
     let USER_AGENTS = [ // 提供一个基础的默认值
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
