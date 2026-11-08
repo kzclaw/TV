@@ -70,7 +70,8 @@ async function searchByAPIAndKeyWord(apiId, query, signal) {
             outcome.failed = true;
             outcome.reason = timedOut ? `超时（>${Math.round(timeoutMs / 1000)}s）` : '请求失败';
             console.warn(`API ${apiId} 搜索失败:`, error);
-            markSourceFailed(apiId);
+            // 401 = 凭据没了，不是源坏了：不熔断（理由同上）
+            if (!error || error.status !== 401) markSourceFailed(apiId);
             return outcome;
         }
         markSourceSucceeded(apiId);

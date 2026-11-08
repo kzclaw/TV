@@ -95,8 +95,8 @@ Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
 // 页面加载
 document.addEventListener('DOMContentLoaded', function () {
-    // 先检查用户是否已通过密码验证
-    if (!isPasswordVerified()) {
+    // 没有凭据时不初始化播放：服务端会回 401，弹密码框
+    if (window.__ENV__ && window.__ENV__.AUTH_MODE === 'password') {
         // 隐藏加载提示
         document.getElementById('player-loading').style.display = 'none';
         return;
@@ -512,26 +512,13 @@ function initPlayer(videoUrl) {
                 async function fallbackToProxy(oldHls) {
                     proxyRetried = true;
 
-                    let hash = null;
-                    try {
-                        hash = window.ProxyAuth && window.ProxyAuth.getPasswordHash
-                            ? await window.ProxyAuth.getPasswordHash()
-                            : null;
-                    } catch (e) {
-                    }
-                    if (!hash) {
-                        showError('视频加载失败：无法获取代理鉴权信息');
-                        return;
-                    }
-
                     try {
                         oldHls.destroy();
                     } catch (e) {
                     }
 
-                    // 只带 auth、不带 t：t= 时间戳 10 分钟就过期，
-                    // 长视频播到一半的分片请求会全部 401。
-                    setupHls('/proxy/' + encodeURIComponent(url) + '?auth=' + encodeURIComponent(hash), true);
+                    // URL 里不带任何凭据：认证走 HttpOnly cookie（同源自动带）
+                    setupHls('/proxy/' + encodeURIComponent(url), true);
                 }
 
                 // 建立（或重建）HLS 实例

@@ -18,9 +18,14 @@ const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '..');
 const source = path.join(root, 'functions', 'proxy', '[[path]].js');
 
-// Pages Function 是 ES Module，Node 里按 .js 会被当成 CommonJS：复制成 .mjs 再 import
+// Pages Function 是 ES Module，Node 里按 .js 会被当成 CommonJS：
+// 整份 functions/ 复制到临时目录并配 type:module，代理的相对 import 才解析得到
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kztv-ssrf-'));
-const tmpModule = path.join(tmpDir, 'proxy.mjs');
+fs.mkdirSync(path.join(tmpDir, 'functions', 'proxy'), { recursive: true });
+fs.writeFileSync(path.join(tmpDir, 'functions', 'package.json'), '{"type":"module"}');
+fs.copyFileSync(path.join(root, 'functions', '_access.js'), path.join(tmpDir, 'functions', '_access.js'));
+fs.copyFileSync(path.join(root, 'functions', '_session.js'), path.join(tmpDir, 'functions', '_session.js'));
+const tmpModule = path.join(tmpDir, 'functions', 'proxy', 'proxy.mjs');
 fs.copyFileSync(source, tmpModule);
 
 // ==== 假网络：DoH 与假站点都不出网 ====
@@ -177,15 +182,17 @@ globalThis.fetch = fakeFetch;
 
     // ==== 断言 7/8：走完整代理链路的判定 ====
     const PASSWORD = 'c15-self-test-password';
-    const authHash = crypto.createHash('sha256').update(PASSWORD).digest('hex');
+    // 认证走 HttpOnly 会话 cookie（URL 里不再带凭据）
+    const session = await import(pathToFileURL(path.join(tmpDir, 'functions', '_session.js')).href);
+    const authCookie = `kt_sess=${await session.signSession(PASSWORD)}`;
     const env = { PASSWORD };
 
     async function proxyRequest(target, { raw = false } = {}) {
         const url = raw
-            ? `http://localhost/proxy/${target}${target.includes('?') ? '&' : '?'}auth=${authHash}`
-            : `http://localhost/proxy/${encodeURIComponent(target)}?auth=${authHash}`;
+            ? `http://localhost/proxy/${target}`
+            : `http://localhost/proxy/${encodeURIComponent(target)}`;
         const res = await onRequest({
-            request: new Request(url),
+            request: new Request(url, { headers: { cookie: authCookie } }),
             env,
             next: () => {},
             waitUntil: () => {}

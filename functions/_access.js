@@ -22,6 +22,12 @@ const JWKS_TTL = 3600 * 1000;
 const nameCache = new Map();        // 身份键 -> { name, at }
 const NAME_TTL = 3600 * 1000;
 const NAME_CACHE_MAX = 200;
+// 验签结果缓存：代理是热路径（一个视频几十个分片请求），
+// 每次都做一次 RS256 验签会白烧 Pages 的 CPU 配额。
+// 缓存命中时仍然检查 exp，所以过期不会因为缓存而多活。
+const tokenCache = new Map();       // token -> { payload, at }
+const TOKEN_CACHE_TTL = 60 * 1000;
+const TOKEN_CACHE_MAX = 500;
 
 function b64urlToBytes(s) {
     const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -34,7 +40,8 @@ function b64urlToBytes(s) {
 
 async function getJwks() {
     if (jwksCache && Date.now() - jwksCache.at < JWKS_TTL) return jwksCache.keys;
-    const res = await fetch(JWKS_URL);
+    // 必须带超时：这是外部端点，挂住会把每个代理请求一起拖死
+    const res = await fetch(JWKS_URL, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`);
     const jwks = await res.json();
     const keys = new Map();
@@ -58,6 +65,20 @@ async function getJwks() {
  * 通过返回 payload，任何一步不过就返回 null（绝不因为头存在就放行）。
  */
 export async function verifyAccessToken(token) {
+    if (!token) return null;
+    const hit = tokenCache.get(token);
+    if (hit && Date.now() - hit.at < TOKEN_CACHE_TTL && hit.payload.exp * 1000 >= Date.now()) {
+        return hit.payload;
+    }
+    const payload = await verifyAccessTokenFresh(token);
+    if (payload) {
+        if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear();
+        tokenCache.set(token, { payload, at: Date.now() });
+    }
+    return payload;
+}
+
+async function verifyAccessTokenFresh(token) {
     const parts = (token || '').split('.');
     if (parts.length !== 3) return null;
     const [h, p, s] = parts;

@@ -29,6 +29,38 @@ jobs:
           done < <(git ls-files '*.js')
           exit $fail
 
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          node --test tests/*.test.mjs tests/*.test.js
+
+      - name: Auth boundary check
+        run: |
+          set -euo pipefail
+          # 密码和它的哈希都不允许出现在前端产物里。
+          # 一旦下发到浏览器，它就不再是秘密（哈希可离线爆破，且是可重放的凭据）。
+          hits=$(git grep -nE '__ENV__\.PASSWORD|\{\{PASSWORD\}\}' -- . ':!libs/' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::前端产物里出现了密码/哈希注入："
+            echo "$hits"
+            exit 1
+          fi
+          # 代理 URL 里不许再拼凭据：认证走 HttpOnly cookie
+          hits=$(git grep -nE '\?auth=' -- . ':!libs/' ':!.github/workflows/ci.yml' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::URL 里出现了 auth 凭据："
+            echo "$hits"
+            exit 1
+          fi
+          # 代理只服务本站自己，不许再声明任意来源可访问
+          hits=$(git grep -n 'Access-Control-Allow-Origin' -- functions/ || true)
+          if [ -n "$hits" ]; then
+            echo "::error::代理不该再放开跨域："
+            echo "$hits"
+            exit 1
+          fi
+          echo "鉴权边界检查通过"
+
       - name: JSON check
         run: |
           set -euo pipefail

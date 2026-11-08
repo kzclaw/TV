@@ -21,6 +21,7 @@ mkdirSync(join(tmp, 'functions'), { recursive: true });
 mkdirSync(join(tmp, 'js'), { recursive: true });
 copyFileSync(new URL('functions/_access.js', REPO), join(tmp, 'functions', '_access.js'));
 copyFileSync(new URL('functions/_middleware.js', REPO), join(tmp, 'functions', '_middleware.js'));
+copyFileSync(new URL('functions/_session.js', REPO), join(tmp, 'functions', '_session.js'));
 copyFileSync(new URL('js/sha256.js', REPO), join(tmp, 'js', 'sha256.js'));
 writeFileSync(join(tmp, 'package.json'), '{"type":"module"}');
 
@@ -162,7 +163,7 @@ globalThis.fetch = async (url) => {
 
 // --- 12) middleware：把身份注入进 HTML ---
 {
-    const html = '<html><body><script>window.__ENV__ = window.__ENV__ || {};\nwindow.__ENV__.PASSWORD = "{{PASSWORD}}";</script></body></html>';
+    const html = '<html><body><script>window.__ENV__ = window.__ENV__ || {};\nwindow.__ENV__.ACCESS_NAME = "{{ACCESS_NAME}}";\nwindow.__ENV__.AUTH_MODE = "{{AUTH_MODE}}";</script></body></html>';
     const context = {
         request: mockRequest(makeJwt(basePayload({ common_name: '戴舒柯', sub: 'sub-mw' }))),
         env: { PASSWORD: 'Kwokzit.tv' },
@@ -171,13 +172,13 @@ globalThis.fetch = async (url) => {
     const res = await middleware.onRequest(context);
     const out = await res.text();
     assert.match(out, /window\.__ENV__\.ACCESS_NAME = "戴舒柯"/, 'middleware 应注入 ACCESS_NAME');
-    assert.doesNotMatch(out, /\{\{PASSWORD\}\}/, '密码占位符应被替换');
+    assert.match(out, /window\.__ENV__\.AUTH_MODE = "access"/, '有 Access 身份时 AUTH_MODE 应为 access');
     assert.doesNotMatch(out, /"Kwokzit\.tv"/, '明文密码不能出现在页面里');
 }
 
-// --- 13) middleware：没有身份时不注入名字，也不影响原有密码逻辑 ---
+// --- 13) middleware：没有身份时要求密码，且绝不下发密码/哈希 ---
 {
-    const html = '<html><body><script>window.__ENV__.PASSWORD = "{{PASSWORD}}";</script></body></html>';
+    const html = '<html><body><script>window.__ENV__.ACCESS_NAME = "{{ACCESS_NAME}}";\nwindow.__ENV__.AUTH_MODE = "{{AUTH_MODE}}";</script></body></html>';
     const context = {
         request: mockRequest(null),
         env: { PASSWORD: 'Kwokzit.tv' },
@@ -185,7 +186,9 @@ globalThis.fetch = async (url) => {
     };
     const out = await (await middleware.onRequest(context)).text();
     assert.match(out, /ACCESS_NAME = ""/, '没有身份时 ACCESS_NAME 应为空串');
-    assert.doesNotMatch(out, /\{\{PASSWORD\}\}/, '密码占位符仍应被替换');
+    assert.match(out, /AUTH_MODE = "password"/, '没有身份也没有会话时 AUTH_MODE 应为 password');
+    assert.doesNotMatch(out, /Kwokzit\.tv/, '明文密码不能出现在页面里');
+    assert.doesNotMatch(out, /PASSWORD/, '页面里不该再出现 PASSWORD 这个变量');
 }
 
 globalThis.fetch = realFetch;

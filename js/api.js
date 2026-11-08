@@ -124,9 +124,7 @@ async function fetchSourceData(apiUrl, timeoutMs, externalSignal) {
 
     try {
         // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ?
-            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
-            PROXY_URL + encodeURIComponent(apiUrl);
+        const proxiedUrl = PROXY_URL + encodeURIComponent(apiUrl);
 
         const response = await fetch(proxiedUrl, {
             headers: API_CONFIG.search.headers,
@@ -134,7 +132,10 @@ async function fetchSourceData(apiUrl, timeoutMs, externalSignal) {
         });
 
         if (!response.ok) {
-            throw new Error(`请求失败: ${response.status}`);
+            // 把状态码带上：401 是「凭据没了」，不是「源坏了」，不能混在一起
+            const err = new Error(`请求失败: ${response.status}`);
+            err.status = response.status;
+            throw err;
         }
 
         const data = await response.json();
@@ -193,9 +194,7 @@ async function handleApiRequest(url, init) {
             
             try {
                 // 添加鉴权参数到代理URL
-                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                    await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
-                    PROXY_URL + encodeURIComponent(apiUrl);
+                const proxiedUrl = PROXY_URL + encodeURIComponent(apiUrl);
                     
                 const response = await fetch(proxiedUrl, {
                     headers: API_CONFIG.search.headers,
@@ -283,9 +282,7 @@ async function handleApiRequest(url, init) {
             
             try {
                 // 添加鉴权参数到代理URL
-                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                    await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
-                    PROXY_URL + encodeURIComponent(detailUrl);
+                const proxiedUrl = PROXY_URL + encodeURIComponent(detailUrl);
                     
                 const response = await fetch(proxiedUrl, {
                     headers: API_CONFIG.detail.headers,
@@ -389,9 +386,7 @@ async function handleCustomApiSpecialDetail(id, customApi) {
         const timeoutId = setTimeout(() => controller.abort(), 10000);
         
         // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
-            PROXY_URL + encodeURIComponent(detailUrl);
+        const proxiedUrl = PROXY_URL + encodeURIComponent(detailUrl);
             
         // 获取详情页HTML
         const response = await fetch(proxiedUrl, {
@@ -457,9 +452,7 @@ async function handleSpecialSourceDetail(id, sourceCode, externalSignal) {
         linkAbortSignal(externalSignal, controller);
         
         // 添加鉴权参数到代理URL
-        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
-            PROXY_URL + encodeURIComponent(detailUrl);
+        const proxiedUrl = PROXY_URL + encodeURIComponent(detailUrl);
             
         // 获取详情页HTML
         const response = await fetch(proxiedUrl, {
@@ -636,7 +629,9 @@ async function handleLatestUpdates() {
             } catch (error) {
                 if (signal.aborted) break;
                 console.warn(`${source}源获取最新更新失败:`, error);
-                markSourceFailed(source);
+                // 401 = 凭据没了，不是源坏了：不能因此把源熔断掉
+                // （熔断状态存在 localStorage，登录后还在，会让源一直处于跳过状态）
+                if (!error || error.status !== 401) markSourceFailed(source);
                 resultsArray.push([]);
             }
         }
@@ -672,20 +667,11 @@ async function handleLatestUpdates() {
         const requestUrl = typeof input === 'string' ? new URL(input, window.location.origin) : input.url;
         
         if (requestUrl.pathname.startsWith('/api/')) {
-            if (window.isPasswordProtected && window.isPasswordVerified) {
-                if (window.isPasswordProtected() && !window.isPasswordVerified()) {
-                    return new Response(JSON.stringify({ code: 401, msg: '请先输入访问密码' }), {
-                        status: 401,
-                        headers: { 'Content-Type': 'application/json' },
-                    });
-                }
-            }
             try {
                 const data = await handleApiRequest(requestUrl, init);
                 return new Response(data, {
                     headers: {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
                     },
                 });
             } catch (error) {
@@ -702,7 +688,14 @@ async function handleLatestUpdates() {
         }
         
         // 非API请求使用原始fetch
-        return originalFetch.apply(this, arguments);
+        const res = await originalFetch.apply(this, arguments);
+
+        // 代理回 401 = 服务端判定「没有可用凭据」→ 弹可见的密码框。
+        // 判定权在服务端，这里只负责把失败显示出来（不吞、不静默）。
+        if (requestUrl.pathname.startsWith('/proxy/') && res.status === 401) {
+            if (typeof window.showPasswordModal === 'function') window.showPasswordModal();
+        }
+        return res;
     };
 })();
 
@@ -1005,8 +998,8 @@ function fillAndSearchWithLatest(title) {
 // 加载最近更新数据并渲染标签与卡片
 async function loadLatestUpdates() {
     if (latestLoading) return;
-    // 密码门未验证时请求会被拦截（拿不到数据），等验证通过后 initLatestUpdates() 会重新触发
-    if (window.isPasswordProtected && window.isPasswordProtected() && !window.isPasswordVerified()) return;
+    // 没有凭据时不发请求：否则一屏请求全部 401，还会把采集源误标成故障
+    if (window.__ENV__ && window.__ENV__.AUTH_MODE === 'password') return;
     latestLoading = true;
     setLatestState('正在加载最近更新…');
 
@@ -1063,7 +1056,7 @@ async function loadLatestUpdates() {
 // 「最近更新」就永远不初始化（首页空着）。这里补一次初始化。
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof initLatestUpdates !== 'function') return;
-    if (window.isPasswordProtected && window.isPasswordVerified && window.isPasswordVerified()) {
+    if (!(window.__ENV__ && window.__ENV__.AUTH_MODE === 'password')) {
         initLatestUpdates();
     }
 });

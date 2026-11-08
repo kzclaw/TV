@@ -151,12 +151,16 @@ async function probeOneSource(key, signal) {
     } catch (e) {
         // 被中止不等于这个源坏了：不该把它记成「超时」
         if (signal && signal.aborted) return null;
+        // 401 = 凭据没了（Access 失效 / 会话过期），不是这个源坏了 —— 不缓存
+        if (e && e.status === 401) return null;
         return { ok: false, ms: -1, at: Date.now() };
     }
 }
 
 // 并发探测已启用的源（限流 2 个），结果逐个点亮
 async function probeSources(force) {
+    // 没有凭据时不探：否则一屏请求全部 401，还会把源缓存成「失败」
+    if (window.__ENV__ && window.__ENV__.AUTH_MODE === 'password') return;
     const cache = boardProbeCache();
     const now = Date.now();
 

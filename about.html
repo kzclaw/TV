@@ -122,9 +122,11 @@
 
 	<div data-chrome="footer"></div>
 	<script>
-		// 环境变量注入（functions/_middleware.js 会把这一行替换成含 ACCESS_NAME 的版本）
+		// 环境变量注入（functions/_middleware.js 会替换下面两行）
+		// 只注入「身份状态」，绝不注入密码或密码哈希。
 		window.__ENV__ = window.__ENV__ || {};
-		window.__ENV__.PASSWORD = "{{PASSWORD}}";
+		window.__ENV__.ACCESS_NAME = "{{ACCESS_NAME}}";
+		window.__ENV__.AUTH_MODE = "{{AUTH_MODE}}";
 	</script>
 	<script src="js/config.js"></script>
 	<script src="js/aggregate.js"></script>

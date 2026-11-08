@@ -11,13 +11,6 @@ const MAX_HISTORY_ITEMS = 5;
 // 新用户首屏因此打出 75 个代理请求。
 const DEFAULT_SOURCE_KEYS = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
 
-// 密码保护配置
-// 注意：PASSWORD 环境变量是必需的，所有部署都必须设置密码以确保安全
-const PASSWORD_CONFIG = {
-    localStorageKey: 'passwordVerified',  // 存储验证状态的键名
-    verificationTTL: 90 * 24 * 60 * 60 * 1000  // 验证有效期（90天，约3个月）
-};
-
 // API站点配置
 // 注意：ruyi/xiaomaomi/heimuer/iqiyi/mozhua/wwzy/ikun/wolong/hwba 这 9 个 key 是历史遗留名
 // （对应的老源已全部失效），现指向新的可用接口；key 名保持不变，避免影响前端已有引用。

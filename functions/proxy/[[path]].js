@@ -1,5 +1,8 @@
 // functions/proxy/[[path]].js
 
+import { verifyAccessToken } from '../_access.js';
+import { verifySession, readCookie, SESSION_COOKIE } from '../_session.js';
+
 // --- 配置 (现在从 Cloudflare 环境变量读取) ---
 // 在 Cloudflare Pages 设置 -> 函数 -> 环境变量绑定 中设置以下变量:
 // CACHE_TTL (例如 86400)
@@ -7,7 +10,7 @@
 // FILTER_DISCONTINUITY (不再需要，设为 false 或移除)
 // USER_AGENTS_JSON (例如 ["UA1", "UA2"]) - JSON 字符串数组
 // DEBUG (例如 false 或 true)
-// PASSWORD (例如 "your_password") - 鉴权密码
+// PASSWORD (例如 "your_password") - 密码兜底用；真正的门是 Cloudflare Access
 // --- 配置结束 ---
 
 // --- 常量 (之前在 config.js 中，现在移到这里，因为它们与代理逻辑相关) ---
@@ -328,25 +331,14 @@ async function fetchWithSsrfGuard(targetUrl, headers, signal) {
     }
 }
 
-/** JSON 响应（带 CORS 头） */
+/** JSON 响应（不带 CORS 头：这个代理只服务本站自己） */
 function createJsonResponse(payload, status) {
     return new Response(JSON.stringify(payload), {
         status,
         headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-            'Access-Control-Allow-Headers': '*',
             'Content-Type': 'application/json'
         }
     });
-}
-
-/**
- * sha256 十六进制哈希（代理鉴权用，结果与浏览器端 js/sha256.js 一致）
- */
-async function sha256Hex(text) {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** 二进制安全的 base64（KV 只能存字符串，分片必须这样存取，否则二进制会被 UTF-8 替换字符破坏） */
@@ -366,6 +358,28 @@ function base64ToBytes(b64) {
 }
 
 
+// 验证代理请求的鉴权。三段式：
+//   ① Cloudflare Access 身份（主路径）—— Access 正常时走这里，用户全程无感
+//   ② 密码会话 cookie（兜底）—— 只有 Access 没罩住 / 被绕过时才需要
+//   ③ 都没有 → 401 auth_required，客户端弹可见的密码框
+// 判定权全在服务端；浏览器拿不到密码，也拿不到密码哈希。
+export async function validateAuth(request, env) {
+    const jwt = request.headers.get('cf-access-jwt-assertion');
+    if (jwt) {
+        const payload = await verifyAccessToken(jwt);
+        if (payload) return { ok: true, via: 'access' };
+        // 头在但验签不过：不当成「有身份」，继续尝试密码会话
+    }
+
+    const secret = env.PASSWORD;
+    if (secret) {
+        const token = readCookie(request, SESSION_COOKIE);
+        if (token && await verifySession(secret, token)) return { ok: true, via: 'password' };
+    }
+
+    return { ok: false, reason: jwt ? 'invalid_access_token' : 'no_credentials' };
+}
+
 /**
  * 主要的 Pages Function 处理函数
  * 拦截发往 /proxy/* 的请求
@@ -374,20 +388,16 @@ export async function onRequest(context) {
     const { request, env, next, waitUntil } = context; // next 和 waitUntil 可能需要
     const url = new URL(request.url);
 
-    // 验证鉴权（主函数调用）
-    // 鉴权哈希只算一次：validateAuth 与「重写分片 URL」共用
-    const serverPasswordHash = env.PASSWORD ? await sha256Hex(env.PASSWORD) : '';
-    const isValidAuth = await validateAuth(request, serverPasswordHash);
-    if (!isValidAuth) {
+    // 验证鉴权：Access 身份优先，其次密码会话 cookie
+    const auth = await validateAuth(request, env);
+    if (!auth.ok) {
         return new Response(JSON.stringify({
             success: false,
-            error: '代理访问未授权：请检查密码配置或鉴权参数'
-        }), { 
+            error: 'auth_required',
+            reason: auth.reason
+        }), {
             status: 401,
             headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-                'Access-Control-Allow-Headers': '*',
                 'Content-Type': 'application/json'
             }
         });
@@ -429,34 +439,6 @@ export async function onRequest(context) {
 
     // --- 辅助函数 ---
 
-    // 验证代理请求的鉴权
-    async function validateAuth(request, serverPasswordHash) {
-        const url = new URL(request.url);
-        const authHash = url.searchParams.get('auth');
-        const timestamp = url.searchParams.get('t');
-
-        if (!serverPasswordHash) {
-            console.error('服务器未设置 PASSWORD 环境变量，代理访问被拒绝');
-            return false;
-        }
-
-        if (!authHash || authHash !== serverPasswordHash) {
-            console.warn('代理请求鉴权失败：密码哈希不匹配');
-            return false;
-        }
-
-        // 验证时间戳（10分钟有效期）
-        if (timestamp) {
-            const now = Date.now();
-            const maxAge = 10 * 60 * 1000; // 10分钟
-            if (now - parseInt(timestamp) > maxAge) {
-                console.warn('代理请求鉴权失败：时间戳过期');
-                return false;
-            }
-        }
-
-        return true;
-    }
 
     // 输出调试日志 (需要设置 DEBUG: true 环境变量)
     function logDebug(message) {
@@ -497,19 +479,10 @@ export async function onRequest(context) {
     // 创建标准化的响应
     function createResponse(body, status = 200, headers = {}) {
         const responseHeaders = new Headers(headers);
-        // 关键：添加 CORS 跨域头，允许前端 JS 访问代理后的响应
-        responseHeaders.set("Access-Control-Allow-Origin", "*"); // 允许任何来源访问
-        responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS"); // 允许的方法
-        responseHeaders.set("Access-Control-Allow-Headers", "*"); // 允许所有请求头
 
-        // 处理 CORS 预检请求 (OPTIONS) - 放在这里确保所有响应都处理
-         if (request.method === "OPTIONS") {
-             // 使用下面的 onOptions 函数可以更规范，但在这里处理也可以
-             return new Response(null, {
-                 status: 204, // No Content
-                 headers: responseHeaders // 包含上面设置的 CORS 头
-             });
-         }
+        // 不设任何 Access-Control-* 头：这个代理只服务于本站自己。
+        // 之前是任意来源都能跨域调本站代理，等于把鉴权也送上门。
+        // 同源请求本来就不需要 CORS 头，认证靠 HttpOnly cookie（同源自动带，也不触发预检）。
 
         return new Response(body, { status, headers: responseHeaders });
     }
@@ -591,10 +564,10 @@ export async function onRequest(context) {
 
     // 将目标 URL 重写为内部代理路径 (/proxy/...)
     function rewriteUrlToProxy(targetUrl) {
-        // 分片 / 密钥 / 初始化段都要经本站转发（上游不给 CORS 头时浏览器会拦死），
-        // 且必须带鉴权：validateAuth 强制要求 ?auth=<sha256(PASSWORD)>。
-        // 不带 t= —— 时间戳 10 分钟就过期，长视频播到一半会全 401。
-        return `/proxy/${encodeURIComponent(targetUrl)}?auth=${serverPasswordHash}`;
+        // 分片 / 密钥 / 初始化段都要经本站转发（上游不给 CORS 头时浏览器会拦死）。
+        // 鉴权靠 cookie（HttpOnly，浏览器同源自动带），所以 URL 里不带任何凭据 ——
+        // 在 URL 里塞密码哈希会把哈希暴露给浏览器，也让它变成可重放的凭据。
+        return `/proxy/${encodeURIComponent(targetUrl)}`;
     }
 
     // 获取远程内容及其类型（二进制安全：整段走 arrayBuffer，绝不用 text()）
@@ -792,8 +765,9 @@ export async function onRequest(context) {
 
         // --- 获取并处理选中的子 M3U8 ---
 
-        // 缓存键带上鉴权哈希：重写后的分片 URL 里含 auth，改密码后旧缓存会 401
-        const cacheKey = `m3u8_processed:${bestVariantUrl}:${serverPasswordHash}`;
+        // 缓存键只跟上游地址绑定：重写后的分片 URL 不再带任何凭据，
+        // 换密码也不该让整份 m3u8 缓存作废（鉴权在响应时做，不在缓存里）。
+        const cacheKey = `m3u8_processed:${bestVariantUrl}`;
 
         let kvNamespace = null;
         try {
@@ -959,19 +933,8 @@ export async function onRequest(context) {
     }
 }
 
-// 处理 OPTIONS 预检请求的函数
-export async function onOptions(context) {
-    // 直接返回允许跨域的头信息
-    return new Response(null, {
-        status: 204, // No Content
-        headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*", // 允许所有请求头
-            "Access-Control-Max-Age": "86400", // 预检请求结果缓存一天
-        },
-    });
-}
+// 不再提供 onOptions：代理不再声明任何跨域策略，同源请求也不会触发预检。
+// 留着它等于把 CORS 头又放回来。
 
 // 导出判定用的纯函数，供 tests/proxy-ssrf.test.js 自检（不依赖网络）
 export { isPrivateIPv4, isPrivateIPv6, isPrivateIP, isLiteralIP, checkProxyUrlSyntax };
