@@ -349,7 +349,7 @@
 .kt-pick .nm { font-size: 12.5px; color: var(--kt-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kt-pick .bar { width: 56px; height: 3px; border-radius: 2px; background: rgba(245, 241, 232, .1); overflow: hidden; flex: none; }
 .kt-pick .bar i { display: block; height: 100%; background: var(--kt-brand); }
-.kt-pick .ms { font-family: var(--kt-font-mono); font-size: 11px; color: var(--kt-text-3); min-width: 54px; text-align: right; flex: none; }
+.kt-pick .ms { font-family: var(--kt-font-mono); font-size: 11px; color: var(--kt-text-3); min-width: 54px; text-align: right; flex: none; white-space: nowrap; }
 .kt-pick .ms .speed-indicator { font-size: 11px; }
 .kt-pick-list { display: flex; flex-direction: column; gap: 2px; }
 .kt-pick .go {
@@ -448,7 +448,7 @@
 
 /* 选源面板顶部的固定槽（播放此源卡片） */
 #sourcePickerTop:empty { display: none; }
-#sourcePickerTop:not(:empty) { padding: 14px 20px 0; border-bottom: 1px solid var(--kt-line); }
+#sourcePickerTop:not(:empty) { padding: 14px 20px; border-bottom: 1px solid var(--kt-line); }
 
 /* 播放器下方：快捷键（居中） → 剧集标题 → 数字按钮独占一行 */
 .kt-player-sub { margin-top: 14px; }
@@ -691,11 +691,11 @@
   .kt-prog-top .cover { width: 96px; }
   .kt-prog-top h3 { font-size: 20px; }
   .kt-pick .bar { width: 44px; }
-  .kt-pick .ms { width: 42px; }
+  .kt-pick .ms { min-width: 42px; }
   .kt-prog .kt-epgrid { grid-template-columns: repeat(3, 1fr); }
 
   /* 放映厅单列 */
-  .kt-hall { grid-template-columns: 1fr; gap: 14px; }
+  .kt-hall { grid-template-columns: 1fr; gap: 14px; padding-bottom: 24px; }
   .kt-player-head { padding: 12px 0 10px; }
   .kt-player-head h2 { font-size: 17px; }
 
