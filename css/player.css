@@ -131,22 +131,11 @@ body, html {
 .shortcut-hint.show { opacity: 1; }
 
 /* ===================== H 键：隐藏 / 显示界面 ===================== */
-/* 隐藏后只剩播放器铺满视口；再按 H（或点右上角按钮）恢复 */
-.kt-page.kt-ui-hidden .kt-topbar,
-.kt-page.kt-ui-hidden .kt-player-head,
-.kt-page.kt-ui-hidden .kt-player-sub,
-.kt-page.kt-ui-hidden .kt-rail,
-.kt-page.kt-ui-hidden .footer { display: none !important; }
-.kt-page.kt-ui-hidden #playerContainer {
-  position: fixed; inset: 0; width: 100%; max-width: none;
-  height: 100dvh; margin: 0; z-index: 30; background: #050506;
-}
-.kt-page.kt-ui-hidden #player {
-  height: 100% !important; aspect-ratio: auto !important; border-radius: 0 !important;
-}
-/* 隐藏后的恢复按钮（右上角，避开 ArtPlayer 控制条） */
+/* 直接复用 ArtPlayer 自带的「网页全屏」(fullscreenWeb)：它把播放器挂到 body 上铺满视口，
+   页面其它部分自然被盖住，控制栏在鼠标移动时照常出现；再按 H（或点右上角按钮）退出。
+   ⚠ 不要自己用 position:fixed 造全屏 —— ArtPlayer 内部尺寸不跟着变，视频会被压成一条。 */
 .kt-fab {
-  position: fixed; top: 14px; right: 14px; z-index: 55;
+  position: fixed; top: 14px; right: 14px; z-index: 10001;  /* > ArtPlayer 网页全屏的 9999 */
   display: none; align-items: center; gap: 6px;
   padding: 7px 13px; border-radius: 999px;
   background: rgba(22, 22, 24, .78); border: 1px solid var(--kt-line);
@@ -154,7 +143,7 @@ body, html {
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 }
 .kt-fab:hover { color: var(--kt-text); border-color: var(--kt-line-2); }
-.kt-page.kt-ui-hidden .kt-fab { display: inline-flex; }
+body.kt-web-fs .kt-fab { display: inline-flex; }
 
 /* 原生全屏 */
 .player-container:-webkit-full-screen, .player-container:fullscreen {

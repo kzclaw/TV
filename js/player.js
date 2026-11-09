@@ -421,8 +421,8 @@ let viewportFitReady = false;
 function fitPlayerToViewport() {
     const pc = document.getElementById('playerContainer');
     if (!pc) return;
-    // 隐藏界面时播放器自己铺满；单列布局（≤560px，手机竖屏）保持现状
-    if (document.body.classList.contains('kt-ui-hidden') || window.innerWidth <= 560) {
+    // 网页全屏时播放器已由 ArtPlayer 接管；单列布局（≤560px，手机竖屏）保持现状
+    if (document.body.classList.contains('kt-web-fs') || window.innerWidth <= 560) {
         pc.style.removeProperty('--kt-player-maxw');
         return;
     }
@@ -446,9 +446,10 @@ function fitPlayerToViewport() {
 
 // 隐藏 / 显示界面：隐藏后只剩播放器铺满视口
 function toggleUiHidden() {
-    const hidden = document.body.classList.toggle('kt-ui-hidden');
-    fitPlayerToViewport();
-    showShortcutHint(hidden ? '界面已隐藏 · 按 H 恢复' : '界面已恢复', 'eye');
+    if (!art) return;
+    // 复用播放器自带的「网页全屏」：ArtPlayer 自己把播放器挂到 body 铺满视口，
+    // 页面其它部分被盖住；退出时它会把播放器放回原位。
+    art.fullscreenWeb = !art.fullscreenWeb;
 }
 
 // 窗口缩放、集数渲染完成、右栏内容加载 → 都重算一次
@@ -750,6 +751,9 @@ function initPlayer(videoUrl) {
     // 全屏 Web 模式处理
     art.on('fullscreenWeb', function (isFullScreen) {
         handleFullScreen(isFullScreen, true);
+        // H 键的界面隐藏 = 网页全屏：body 上的 class 负责显示右上角恢复按钮
+        document.body.classList.toggle('kt-web-fs', isFullScreen);
+        showShortcutHint(isFullScreen ? '界面已隐藏 · 按 H 恢复' : '界面已恢复', 'eye');
     });
 
     // 全屏模式处理
