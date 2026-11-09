@@ -826,7 +826,10 @@ export async function onRequest(context) {
              try {
                  // 使用 waitUntil 异步写入缓存，不阻塞响应返回
                  // 注意 KV 的写入限制 (免费版每天 1000 次)
-                 waitUntil(kvNamespace.put(cacheKey, processedVariant, { expirationTtl: CACHE_TTL }));
+                 // ⚠ 必须自己接住拒绝：waitUntil 不 await，外层 try/catch 只覆盖同步期，
+                 //   KV 写失败（写额度被封时是 429）发生在 promise 上 → 漏出去就是未处理拒绝。
+                 waitUntil(kvNamespace.put(cacheKey, processedVariant, { expirationTtl: CACHE_TTL })
+                     .catch(err => logDebug(`向 KV 写入缓存失败 (${cacheKey}): ${err.message}`)));
                  logDebug(`已将处理后的子列表写入缓存: ${bestVariantUrl}`);
              } catch (kvError) {
                  logDebug(`向 KV 写入缓存失败 (${cacheKey}): ${kvError.message}`);
@@ -919,7 +922,9 @@ export async function onRequest(context) {
                  // 白吃免费额度里的写/删配额（见 shouldWriteToKV）。
                  if (shouldWriteToKV(bytes, contentType)) {
                      // 注意 KV 写入限制
-                     waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: CACHE_TTL }));
+                     // ⚠ 同上：waitUntil 不 await，put 的拒绝必须自己接住，否则会变成未处理拒绝
+                     waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: CACHE_TTL })
+                         .catch(err => logDebug(`向 KV 写入缓存失败 (${cacheKey}): ${err.message}`)));
                  }
                  logDebug(`已将原始内容写入缓存: ${targetUrl}`);
             } catch (kvError) {
