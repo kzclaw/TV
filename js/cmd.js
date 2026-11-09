@@ -122,7 +122,14 @@ function cmdBuildItems() {
         { label: '观看历史', icon: 'clock', run: function () { if (typeof toggleHistory === 'function') toggleHistory(); } },
         { label: '导出配置', icon: 'down', run: function () { if (typeof exportConfig === 'function') exportConfig(); } },
         { label: '导入配置', icon: 'down', run: function () { if (typeof importConfig === 'function') importConfig(); } },
-        { label: '关于我们', icon: 'film', run: function () { window.location.href = 'about.html'; } }
+        { label: '关于我们', icon: 'film', run: function () {
+            if (typeof window.showInfoModal === 'function') { window.showInfoModal('about'); return; }
+            window.location.href = 'about.html';
+        } },
+        { label: '使用声明', icon: 'film', run: function () {
+            if (typeof window.showInfoModal === 'function') { window.showInfoModal('terms'); return; }
+            window.location.href = 'about.html';
+        } }
     ].forEach(function (a) {
         items.push({ group: '操作', icon: a.icon, label: a.label, kb: '', run: a.run });
     });

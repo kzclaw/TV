@@ -177,7 +177,41 @@
                 <button onclick="clearLocalStorage()" class="kt-btn danger w-full" type="button">清除Cookie</button>
             </div>
         </div>
+    </div>
+
+    <!-- ===================== 信息弹窗（关于我们 / 隐私政策 / 使用声明） =====================
+         全站只此一份，由 chrome.js 注入 → 三个页面行为一致，内容也只有一份。
+         使用声明的「首次访问自动弹出」复用同一个弹窗（mode=accept），页脚入口是 view 模式。 -->
+    <div class="kt-modal" id="ktInfoModal" hidden>
+        <div class="kt-modal-card" role="dialog" aria-modal="true" aria-labelledby="ktInfoTitle">
+            <div class="kt-modal-head">
+                <svg class="mark" viewBox="0 0 512 512" fill="none" aria-hidden="true">
+                    <g stroke="currentColor" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M256 100 L194 44 M256 100 L318 44"/>
+                        <rect x="52" y="100" width="408" height="306" rx="48"/>
+                    </g>
+                    <path d="M196 168 L196 338 L334 253 Z" fill="currentColor"/>
+                </svg>
+                <div>
+                    <div class="kick" id="ktInfoKick"></div>
+                    <h3 id="ktInfoTitle"></h3>
+                </div>
+            </div>
+            <div class="kt-modal-body" id="ktInfoBody"></div>
+            <div class="kt-modal-foot">
+                <span class="note" id="ktInfoNote"></span>
+                <a id="ktInfoLink" href="about.html">查看完整说明 →</a>
+                <button class="kt-btn pri big" id="ktInfoBtn" type="button">知道了</button>
+            </div>
+        </div>
     </div>`;
+
+  // 关于页上这三个链接指本页锚点（内容就在同一页）；其它页面指 about.html，由 JS 接管成弹窗
+  var onAboutPage = /about\.html$/.test(location.pathname) || location.pathname === '/about';
+  function footLink(id, anchor, label) {
+    return '<a href="' + (onAboutPage ? '#' + anchor : 'about.html') + '"'
+         + (onAboutPage ? '' : ' data-about="' + id + '"') + '>' + label + '</a>';
+  }
 
   var FOOTER_HTML = `<footer class="footer">
         <div class="kt-shell kt-foot">
@@ -185,11 +219,133 @@
                 <p class="text-gray-500 text-sm">© 2026 KzTv · 自由观影，畅享精彩</p>
             </div>
             <div>
-                <a href="about.html">关于我们</a>
-                <a href="about.html">隐私政策</a>
+                ${footLink('about', 'about', '关于我们')}
+                ${footLink('privacy', 'privacy', '隐私政策')}
+                ${footLink('terms', 'terms', '使用声明')}
             </div>
         </div>
     </footer>`;
+
+  // ============================================================
+  // 信息弹窗内容：全站唯一真本
+  //   terms   使用声明（沿用原声明弹窗文案）
+  //   privacy 隐私政策（取自 about.html）
+  //   about   关于 KzTv（取自 about.html）
+  // 弹窗里 <b> 是块级小标题（.kt-modal-body b{display:block}），
+  // 句中强调一律用 <strong>，否则会被撑成独立一行。
+  // ============================================================
+  var KT_INFO_CONTENT = {
+    terms: {
+      kick: 'KzTv · 使用声明',
+      title: '使用声明',
+      body: '<p><b>服务性质</b>KzTv 只做搜索与跳转：不存储、不上传、不转存任何视频文件。片单与播放地址均来自第三方公开接口，由浏览器直接向源站请求。</p>'
+          + '<p><b>用户责任</b>使用本站服务须遵守相关法律法规，不得利用搜索结果从事侵权行为，如下载、传播未经授权的作品。</p>'
+          + '<p><b>广告风险</b>视频中的广告与本站无关，来自第三方采集站。请勿相信或点击视频内的任何广告内容。</p>',
+      noteAccept: '继续浏览即表示已阅读并接受上述条款',
+      noteView: '首次访问时会自动弹出这份声明',
+      link: '查看完整说明 →',
+      href: 'about.html'
+    },
+    privacy: {
+      kick: 'KzTv · 隐私政策',
+      title: '隐私政策',
+      body: '<p><b>数据保护</b>本站不收集你的个人身份信息，不接入第三方统计与广告追踪。你输入的搜索词只会发送到对应的采集接口，用于返回结果，不会被本站留存。</p>'
+          + '<p><b>本地存储</b>仅在你自己的浏览器里保存少量必要状态，例如搜索偏好、播放进度，以及（若站点设置了访问密码）该密码的<strong>哈希值</strong>——用于向站内代理发起请求时出示凭证。<strong>密码本体不会写入浏览器存储</strong>，也只会以哈希形式出现在页面脚本里。清空浏览器数据即可全部清除。</p>',
+      noteAccept: '',
+      noteView: '完整版含版权声明与技术授权',
+      link: '查看完整说明 →',
+      href: 'about.html'
+    },
+    about: {
+      kick: 'KzTv · 关于',
+      title: '关于 KzTv',
+      body: '<p><b>这是什么</b>KzTv 是一个免费的多源视频搜索与观看平台。它把多个公开的视频采集接口聚合到一处，你在站内搜索，即可浏览各个来源提供的片单并跳转播放。</p>'
+          + '<p><b>只做搜索与跳转</b>不存储、不上传、不转存任何视频文件，视频内容全部来自第三方公开接口，由浏览器直接向源站请求。</p>',
+      noteAccept: '',
+      noteView: '完整版含版权声明与技术授权',
+      link: '查看完整说明 →',
+      href: 'about.html'
+    }
+  };
+
+  function closeInfoModal() {
+    var modal = document.getElementById('ktInfoModal');
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    var t = modal._trigger;
+    if (t && t.focus) { try { t.focus(); } catch (e) {} }
+  }
+
+  // kind: terms | privacy | about
+  // opts: { mode: 'view' | 'accept', name: 身份名, onAccept: 回调 }
+  window.showInfoModal = function (kind, opts) {
+    var c = KT_INFO_CONTENT[kind];
+    var modal = document.getElementById('ktInfoModal');
+    if (!c || !modal) return;
+    opts = opts || {};
+    var isAccept = opts.mode === 'accept';
+
+    var kick = document.getElementById('ktInfoKick');
+    if (kick) kick.textContent = c.kick;
+
+    var title = document.getElementById('ktInfoTitle');
+    if (title) {
+      title.textContent = '';
+      if (isAccept && opts.name) {
+        title.appendChild(document.createTextNode('欢迎回来，'));
+        var em = document.createElement('em');
+        em.textContent = opts.name;          // 名字来自 JWT，走 textContent 防注入
+        title.appendChild(em);
+      } else {
+        title.textContent = c.title;
+      }
+    }
+
+    var body = document.getElementById('ktInfoBody');
+    if (body) body.innerHTML = c.body;
+
+    var note = document.getElementById('ktInfoNote');
+    if (note) note.textContent = isAccept ? c.noteAccept : c.noteView;
+    var link = document.getElementById('ktInfoLink');
+    if (link) { link.textContent = c.link; link.href = c.href; link.hidden = isAccept || !c.link; }
+    var btn = document.getElementById('ktInfoBtn');
+    if (btn) btn.textContent = isAccept ? '我已了解并接受' : '知道了';
+
+    modal._onAccept = isAccept ? (opts.onAccept || null) : null;
+    modal._trigger = document.activeElement;
+    modal.hidden = false;
+    if (btn) { try { btn.focus(); } catch (e) {} }
+  };
+
+  function bindInfoModal() {
+    var modal = document.getElementById('ktInfoModal');
+    if (!modal) return;
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) { closeInfoModal(); return; }   // 点遮罩关闭
+      if (e.target.closest && e.target.closest('#ktInfoBtn')) {
+        var cb = modal._onAccept;
+        if (cb) { try { cb(); } catch (err) {} }
+        closeInfoModal();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) closeInfoModal();
+    });
+
+    // 页脚三个入口：事件委托（内容是注入的，绑定在 document 上）
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-about]');
+      if (!a) return;
+      e.preventDefault();                 // 无 JS 时 href="about.html" 照常跳页
+      window.showInfoModal(a.getAttribute('data-about'));
+    });
+
+    // 关于页的声明段落：内容真本在上面那张表里，这里只负责把它放进页面
+    var aboutTerms = document.getElementById('ktAboutTerms');
+    if (aboutTerms) aboutTerms.innerHTML = KT_INFO_CONTENT.terms.body;
+  }
 
   function fill(attr, html) {
     var nodes = document.querySelectorAll('[data-chrome="' + attr + '"]');
@@ -238,6 +394,7 @@
   fill('footer', FOOTER_HTML);
   renderIdentity();
   applyCapabilities();
+  bindInfoModal();
 
   // 设置面板里的「数据源设置」要靠 app.js 的 initAPICheckboxes 填充源列表；
   // 没加载 app.js 的页面（播放页/关于页）把这一组藏掉，别给一个空框。

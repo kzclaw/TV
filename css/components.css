@@ -471,7 +471,9 @@
 
 /* ===================== 弹层（声明 / 密码 / 其它） ===================== */
 .kt-modal {
-  position: fixed; inset: 0; z-index: 70;
+  /* z-index 要高于 ArtPlayer 网页全屏(9999)与恢复按钮(10001)，
+     否则播放器页 H 键全屏时开弹窗会被播放器盖住 */
+  position: fixed; inset: 0; z-index: 10002;
   background: rgba(6, 6, 7, .74);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
@@ -494,16 +496,20 @@
 .kt-modal-head h3 { font-family: var(--kt-font-serif); font-size: 22px; margin: 3px 0 0; font-weight: 600; }
 .kt-modal-head h3 em { font-style: normal; color: var(--kt-brand); }
 .kt-modal-body { padding: 20px 22px 4px; overflow-y: auto; }
-.kt-modal-body p { font-size: 13.5px; line-height: 1.75; color: var(--kt-text-2); margin: 0 0 14px; }
-.kt-modal-body b {
+.kt-modal-body p, .kt-about-text p { font-size: 13.5px; line-height: 1.75; color: var(--kt-text-2); margin: 0 0 14px; }
+.kt-modal-body b, .kt-about-text b {
   display: block; color: var(--kt-brand); font-size: 11px;
   letter-spacing: .14em; font-weight: 600; margin-bottom: 3px;
 }
+.kt-about-text strong { color: var(--kt-text); font-weight: 600; }
 .kt-modal-foot {
   flex: none; padding: 16px 22px 20px; border-top: 1px solid var(--kt-line);
   display: flex; align-items: center; gap: 14px;
 }
 .kt-modal-foot .note { font-size: 11.5px; color: var(--kt-text-3); flex: 1; }
+.kt-modal-foot a { color: var(--kt-text-2); font-size: 12.5px; text-decoration: none; white-space: nowrap; }
+.kt-modal-foot a:hover { color: var(--kt-brand); }
+.kt-modal-foot a[hidden] { display: none; }
 
 /* ===================== 命令面板 ===================== */
 .kt-cmd {

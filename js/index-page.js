@@ -80,32 +80,17 @@ function maybeShowDisclaimer(name) {
     }
     if (seen === KT_DISCLAIMER_VERSION) return;
 
-    const modal = document.getElementById('ktDisclaimer');
-    if (!modal) return;
+    // 声明弹窗由 chrome.js 注入（全站只此一份），这里只管「首次访问要不要弹」
+    if (typeof window.showInfoModal !== 'function') return;
 
-    // 有身份时把欢迎词提到标题里（衬线 + 品牌金）
-    const title = document.getElementById('ktDiscTitle');
-    if (title && name) {
-        title.textContent = '欢迎回来，';
-        const em = document.createElement('em');
-        em.textContent = name;
-        title.appendChild(em);
-    }
-
-    modal.hidden = false;
-
-    const accept = document.getElementById('ktDiscAccept');
-    if (accept) {
-        accept.addEventListener('click', function () {
+    window.showInfoModal('terms', {
+        mode: 'accept',
+        name: name,              // 有身份时把欢迎词提到标题里（衬线 + 品牌金）
+        onAccept: function () {
             try {
                 localStorage.setItem(KT_DISCLAIMER_KEY, KT_DISCLAIMER_VERSION);
             } catch (e) { /* 存不了就下次再弹，无所谓 */ }
-            modal.hidden = true;
-        }, { once: true });
-    }
-
-    // 点遮罩也能关闭（但不算「已接受」，下次仍会弹）
-    modal.addEventListener('click', function (e) {
-        if (e.target === modal) modal.hidden = true;
+        }
     });
+    // 点遮罩也能关闭（但不算「已接受」，下次仍会弹）→ 统一由 chrome.js 处理
 }
