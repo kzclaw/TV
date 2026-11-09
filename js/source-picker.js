@@ -352,8 +352,16 @@ const sourcePickerQualityLimiter = createLimiter(2);
 
 // 探测这个源的画质：起一个隐藏 video 实测它自己的分辨率（不是清单声明值）
 function probeSourcePickerQuality(entry, playUrl, signal) {
+    // 同一个「源+影片」探过就别再探了（缓存命中直接用）
+    const cached = getCachedQuality(entry.sourceKey, entry.vodId);
+    if (cached) {
+        entry.quality = cached;
+        refreshSourcePickerEntry(entry);
+        return;
+    }
     if (!playUrl) {
         entry.quality = { state: 'failed' };
+        putCachedQuality(entry.sourceKey, entry.vodId, entry.quality);
         refreshSourcePickerEntry(entry);
         return;
     }
@@ -364,6 +372,7 @@ function probeSourcePickerQuality(entry, playUrl, signal) {
         entry.quality = quality
             ? { state: 'measured', width: quality.width, height: quality.height }
             : { state: 'failed' };
+        putCachedQuality(entry.sourceKey, entry.vodId, entry.quality);
         refreshSourcePickerEntry(entry);
     });
 }

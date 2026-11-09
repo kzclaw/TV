@@ -13,10 +13,18 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 
+// 可写的 localStorage（画质缓存要用）
+const store = new Map();
+const localStorageStub = {
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+    removeItem: key => { store.delete(key); },
+};
+
 const sandbox = {
     console: { log() {}, info() {}, warn() {}, error() {}, debug() {} },
     window: {},
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    localStorage: localStorageStub,
     document: {
         addEventListener() {},
         getElementById: () => null,
@@ -115,7 +123,49 @@ async function main() {
             '徽章不能塞进名字内部（长源名会把它一起裁掉）');
     }
 
-    // ============ ⑦ 播放器页：徽章必须跟在片名后面，且在 h2 外面 ============
+    // ============ ⑦ 画质缓存：同源同片不重复探测 ============
+    {
+        store.clear();
+        assert.equal(sandbox.getCachedQuality('ruyi', '123'), null, '没探过就没有缓存');
+
+        sandbox.putCachedQuality('ruyi', '123', { state: 'measured', width: 1920, height: 1080 });
+        const hit = sandbox.getCachedQuality('ruyi', '123');
+        assert.equal(hit.state, 'measured');
+        assert.equal(hit.width, 1920);
+        assert.equal(hit.height, 1080);
+
+        assert.equal(sandbox.getCachedQuality('ruyi', '456'), null, '换一部片就是另一条缓存');
+        assert.equal(sandbox.getCachedQuality('bfzy', '123'), null, '换源就是另一条缓存');
+    }
+
+    // ============ ⑧ 缓存过期：成功 30 天、失败 2 分钟 ============
+    {
+        store.clear();
+        sandbox.putCachedQuality('ruyi', '123', { state: 'measured', width: 1920, height: 1080 });
+        sandbox.putCachedQuality('ruyi', 'fail', { state: 'failed' });
+
+        const cache = sandbox.readQualityCache();
+        cache['ruyi:123'].t = Date.now() - 31 * 24 * 3600 * 1000;   // 成功但过期
+        cache['ruyi:fail'].t = Date.now() - 3 * 60 * 1000;          // 失败但过期
+        sandbox.saveQualityCache(cache);
+
+        assert.equal(sandbox.getCachedQuality('ruyi', '123'), null, '超过 30 天的成功记录要作废');
+        assert.equal(sandbox.getCachedQuality('ruyi', 'fail'), null, '超过 2 分钟的失败记录要作废');
+    }
+
+    // ============ ⑨ 缓存条数封顶 400（丢最旧的） ============
+    {
+        store.clear();
+        for (let i = 0; i < 405; i++) {
+            sandbox.putCachedQuality('src' + i, 'vod', { state: 'measured', width: 1920, height: 1080 });
+        }
+        const size = Object.keys(sandbox.readQualityCache()).length;
+        assert.ok(size <= 400, `缓存条数应封顶 400，实际 ${size}`);
+        assert.equal(sandbox.getCachedQuality('src0', 'vod'), null, '最旧的条目应被丢掉');
+        assert.ok(sandbox.getCachedQuality('src404', 'vod'), '最新的条目应留着');
+    }
+
+    // ============ ⑩ 播放器页：徽章必须跟在片名后面，且在 h2 外面 ============
     {
         const page = fs.readFileSync(path.join(root, 'player.html'), 'utf8');
         const head = page.slice(page.indexOf('class="kt-player-head"'), page.indexOf('class="kt-hall"'));

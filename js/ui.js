@@ -167,6 +167,53 @@ function renderQualityBadge(el, quality) {
     }
 }
 
+// 画质探测结果的缓存：同一个「源+影片」重复展开面板时不用再探一遍
+// （每次探测都要真下几个分片，重复探是纯流量浪费；成功 30 天、失败 2 分钟、400 条封顶）
+const QUALITY_CACHE_KEY = 'kzTvQualityV1';
+const QUALITY_CACHE_TTL = 30 * 24 * 60 * 60 * 1000;
+const QUALITY_CACHE_FAIL_TTL = 2 * 60 * 1000;
+const QUALITY_CACHE_MAX = 400;
+
+function readQualityCache() {
+    try {
+        return JSON.parse(localStorage.getItem(QUALITY_CACHE_KEY) || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveQualityCache(cache) {
+    try {
+        localStorage.setItem(QUALITY_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        // 存不下就算了：只是少一层缓存，不该影响播放
+    }
+}
+
+// 命中且没过期 → 返回 {state:'measured'|'failed'}；没有或过期 → null
+function getCachedQuality(sourceKey, vodId) {
+    const hit = readQualityCache()[sourceKey + ':' + vodId];
+    if (!hit || !hit.t) return null;
+    const ttl = hit.w ? QUALITY_CACHE_TTL : QUALITY_CACHE_FAIL_TTL;
+    if (Date.now() - hit.t > ttl) return null;
+    return hit.w ? { state: 'measured', width: hit.w, height: hit.h } : { state: 'failed' };
+}
+
+function putCachedQuality(sourceKey, vodId, quality) {
+    const cache = readQualityCache();
+    const measured = quality && quality.state === 'measured';
+    cache[sourceKey + ':' + vodId] = measured
+        ? { w: quality.width, h: quality.height, t: Date.now() }
+        : { t: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > QUALITY_CACHE_MAX) {
+        keys.sort((a, b) => (cache[a].t || 0) - (cache[b].t || 0))
+            .slice(0, keys.length - QUALITY_CACHE_MAX)
+            .forEach(key => { delete cache[key]; });
+    }
+    saveQualityCache(cache);
+}
+
 // hls.js 按需加载：播放器页已经在 <script> 里引了，首页没有 —— 只在真要探测时才拉一次
 function ensureHlsLib() {
     if (window.Hls) return Promise.resolve(window.Hls);
