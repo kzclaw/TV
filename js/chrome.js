@@ -217,6 +217,7 @@
         <div class="kt-shell kt-foot">
             <div>
                 <p class="text-gray-500 text-sm">© 2026 KzTv · 自由观影，畅享精彩</p>
+                <p class="text-sm mt-1 text-center md:text-left" style="color: var(--kt-text-3)"><a href="https://www.cloudflare.com" target="_blank" rel="noopener">Powered by Cloudflare</a></p>
             </div>
             <div>
                 ${footLink('about', 'about', '关于我们')}

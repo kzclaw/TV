@@ -431,7 +431,7 @@ function fitPlayerToViewport() {
     if (!curH) return;
 
     // 「播放器以外的内容有多高」：文档总高 − 播放器当前高。
-    // 逐项相加会漏掉异步变化（比如页脚的「版本」行是后补的），
+    // 逐项相加会漏掉异步变化（比如页脚里后补的内容、字体加载后的回流），
     // 这样量则与播放器当前高度无关，天然不自我循环。
     const others = Math.max(document.documentElement.scrollHeight, vh) - curH;
 
@@ -465,7 +465,7 @@ function setupViewportFit() {
     });
     if (!window.ResizeObserver) return;
     viewportFitObserver = new ResizeObserver(function () { fitPlayerToViewport(); });
-    // 集数渲染、右侧栏内容、页脚的「版本」行（异步补上）都会改变可用高度 → 都要重算
+    // 集数渲染、右侧栏内容、页脚（内容后补或换行）都会改变可用高度 → 都要重算
     const watch = ['.kt-player-sub', '.kt-rail', 'footer', '.kt-player-head'];
     watch.forEach(function (sel) {
         const el = document.querySelector(sel);
