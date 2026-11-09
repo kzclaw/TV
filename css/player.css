@@ -68,7 +68,20 @@ body, html {
 }
 
 .player-container { width: 100%; max-width: 1000px; margin: 0 auto; }
-#player { width: 100%; height: 60vh; }
+/* 放映厅：播放器高度由视口反推 —— 宽度跟着 16:9 缩，整页刚好铺满、不滚动。
+   399px = 顶栏 60 + 片名行 72 + 放映厅内边距 20+24 + 副区 136 + 页脚 87（近似值，
+   js/player.js 的 fitPlayerToViewport() 会按实际内容高度校准）。
+   只在 ≥561px 宽、≥600px 高时生效：
+   - ≤560px 宽是单列布局，手机保持播放器 100% 宽；
+   - <600px 高时缩到最小也放不下（照旧要滚），保持列宽，别把画面压小
+     （此时 (100dvh-399) 为负，min() 会被算成 0，播放器会被压成 0 宽）。 */
+@media (min-width: 561px) and (min-height: 600px) {
+  #playerContainer {
+    max-width: min(1000px, var(--kt-player-maxw, calc((100dvh - 399px) * 16 / 9)));
+  }
+}
+/* 高度由 .player-placeholder 的 aspect-ratio 决定（原 #player{height:60vh} 是死规则，被 !important 压住） */
+#player { width: 100%; }
 
 /* 加载 / 错误覆盖层 */
 .loading-container {
@@ -116,6 +129,32 @@ body, html {
   border: 1px solid var(--kt-line);
 }
 .shortcut-hint.show { opacity: 1; }
+
+/* ===================== H 键：隐藏 / 显示界面 ===================== */
+/* 隐藏后只剩播放器铺满视口；再按 H（或点右上角按钮）恢复 */
+.kt-page.kt-ui-hidden .kt-topbar,
+.kt-page.kt-ui-hidden .kt-player-head,
+.kt-page.kt-ui-hidden .kt-player-sub,
+.kt-page.kt-ui-hidden .kt-rail,
+.kt-page.kt-ui-hidden .footer { display: none !important; }
+.kt-page.kt-ui-hidden #playerContainer {
+  position: fixed; inset: 0; width: 100%; max-width: none;
+  height: 100dvh; margin: 0; z-index: 30; background: #050506;
+}
+.kt-page.kt-ui-hidden #player {
+  height: 100% !important; aspect-ratio: auto !important; border-radius: 0 !important;
+}
+/* 隐藏后的恢复按钮（右上角，避开 ArtPlayer 控制条） */
+.kt-fab {
+  position: fixed; top: 14px; right: 14px; z-index: 55;
+  display: none; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 999px;
+  background: rgba(22, 22, 24, .78); border: 1px solid var(--kt-line);
+  color: var(--kt-text-2); font-size: 12px; line-height: 1; cursor: pointer;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.kt-fab:hover { color: var(--kt-text); border-color: var(--kt-line-2); }
+.kt-page.kt-ui-hidden .kt-fab { display: inline-flex; }
 
 /* 原生全屏 */
 .player-container:-webkit-full-screen, .player-container:fullscreen {

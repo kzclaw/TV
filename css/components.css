@@ -318,7 +318,8 @@
   font-family: var(--kt-font-mono); font-size: 11px;
   letter-spacing: .2em; text-transform: uppercase; color: var(--kt-brand);
 }
-.kt-prog-body { padding: 20px 20px 0; overflow-y: auto; flex: 1; min-height: 0; }
+/* 底部 14px：内容长时（长简介 + 多集数）最后一个元素是集数网格，别让它压在 CTA 的分割线上 */
+.kt-prog-body { padding: 20px 20px 14px; overflow-y: auto; flex: 1; min-height: 0; }
 .kt-prog-top { display: flex; gap: 16px; }
 .kt-prog-top .cover {
   width: 118px; flex: none; aspect-ratio: 2 / 3; border-radius: var(--kt-r);
@@ -374,7 +375,8 @@
 }
 
 /* ===================== 放映厅 ===================== */
-.kt-hall { display: grid; grid-template-columns: 1fr 268px; gap: 20px; padding: 20px 0 0; }
+/* 底部 24px：集数网格与页脚分割线之间的呼吸（播放器高度自适应会把这段算进预算，不会多出滚动条） */
+.kt-hall { display: grid; grid-template-columns: 1fr 268px; gap: 20px; padding: 20px 0 24px; }
 .kt-stage {
   aspect-ratio: 16 / 9; background: #050506; border-radius: var(--kt-r-lg);
   border: 1px solid var(--kt-line); overflow: hidden; position: relative;

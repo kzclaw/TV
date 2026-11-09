@@ -238,6 +238,9 @@ function initializePageContent() {
     // 渲染集数列表
     renderEpisodes();
 
+    // 播放器高度自适应视口：整页刚好铺满，不出现滚动条
+    setupViewportFit();
+
     // 更新按钮状态
     updateButtonStates();
 
@@ -358,6 +361,12 @@ function handleKeyboardShortcuts(e) {
             e.preventDefault();
         }
     }
+
+    // h 键 = 隐藏 / 显示界面（隐藏后只剩播放器铺满视口）
+    if (e.key === 'h' || e.key === 'H') {
+        toggleUiHidden();
+        e.preventDefault();
+    }
 }
 
 // 显示快捷键提示
@@ -386,6 +395,8 @@ function showShortcutHint(text, direction) {
         iconElement.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"></path>';
     } else if (direction === 'play') {
         iconElement.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z"></path>';
+    } else if (direction === 'eye') {
+        iconElement.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle>';
     }
 
     // 显示提示
@@ -395,6 +406,70 @@ function showShortcutHint(text, direction) {
     shortcutHintTimeout = setTimeout(() => {
         hintElement.classList.remove('show');
     }, 2000);
+}
+
+// =================================
+// ============== 视口自适应 ==============
+// =================================
+// 播放器高度由视口反推：整页刚好铺满，不出现滚动条。
+// 集数网格与页脚分割线之间那 24px 留白（.kt-hall 的 padding-bottom）也算进预算，
+// 所以「刚好铺满」和「不粘分割线」是同一件事的两面。
+const PLAYER_MIN_H = 200;   // 再矮就不缩了，改为允许滚动
+let viewportFitObserver = null;
+let viewportFitReady = false;
+
+function fitPlayerToViewport() {
+    const pc = document.getElementById('playerContainer');
+    if (!pc) return;
+    // 隐藏界面时播放器自己铺满；单列布局（≤560px，手机竖屏）保持现状
+    if (document.body.classList.contains('kt-ui-hidden') || window.innerWidth <= 560) {
+        pc.style.removeProperty('--kt-player-maxw');
+        return;
+    }
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    const curH = pc.offsetHeight;
+    if (!curH) return;
+
+    // 「播放器以外的内容有多高」：文档总高 − 播放器当前高。
+    // 逐项相加会漏掉异步变化（比如页脚的「版本」行是后补的），
+    // 这样量则与播放器当前高度无关，天然不自我循环。
+    const others = Math.max(document.documentElement.scrollHeight, vh) - curH;
+
+    const target = vh - others;
+    if (target < PLAYER_MIN_H) {
+        // 视口太矮（手机横屏等）：缩到最小也放不下，照样要滚 → 别白白把视频变小
+        pc.style.setProperty('--kt-player-maxw', '1000px');
+        return;
+    }
+    pc.style.setProperty('--kt-player-maxw', Math.round(target * 16 / 9) + 'px');
+}
+
+// 隐藏 / 显示界面：隐藏后只剩播放器铺满视口
+function toggleUiHidden() {
+    const hidden = document.body.classList.toggle('kt-ui-hidden');
+    fitPlayerToViewport();
+    showShortcutHint(hidden ? '界面已隐藏 · 按 H 恢复' : '界面已恢复', 'eye');
+}
+
+// 窗口缩放、集数渲染完成、右栏内容加载 → 都重算一次
+function setupViewportFit() {
+    fitPlayerToViewport();
+    if (viewportFitReady) return;
+    viewportFitReady = true;
+
+    let timer = null;
+    window.addEventListener('resize', function () {
+        clearTimeout(timer);
+        timer = setTimeout(fitPlayerToViewport, 120);
+    });
+    if (!window.ResizeObserver) return;
+    viewportFitObserver = new ResizeObserver(function () { fitPlayerToViewport(); });
+    // 集数渲染、右侧栏内容、页脚的「版本」行（异步补上）都会改变可用高度 → 都要重算
+    const watch = ['.kt-player-sub', '.kt-rail', 'footer', '.kt-player-head'];
+    watch.forEach(function (sel) {
+        const el = document.querySelector(sel);
+        if (el) viewportFitObserver.observe(el);
+    });
 }
 
 // 初始化播放器

@@ -130,6 +130,17 @@
 
     <div data-chrome="footer"></div>
 
+    <!-- 隐藏界面后的恢复按钮（H 键隐藏后出现，点它也能恢复） -->
+    <button id="ktUiToggle" class="kt-fab" type="button" onclick="toggleUiHidden()"
+            aria-label="显示界面" title="显示界面 (H)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" aria-hidden="true">
+            <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/>
+            <circle cx="12" cy="12" r="3"/>
+        </svg>
+        显示界面
+    </button>
+
     <!-- 快捷键提示 -->
     <div class="shortcut-hint" id="shortcutHint">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="shortcutIcon" aria-hidden="true">
