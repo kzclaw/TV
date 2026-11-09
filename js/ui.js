@@ -680,9 +680,7 @@ async function playFromHistory(url, title, episodeIndex, playbackPosition = 0) {
             try {
                 const nestedUrl = new URL(url, window.location.origin);
                 const nestedParams = nestedUrl.searchParams;
-                // 优先用同步到的最新集数地址：老历史里存的是「云解析页」地址（HTML），
-                // 喂给 hls.js 必然失败；episodesList 来自 /api/detail，已是可直接播放的地址。
-                const realVideoUrl = episodesList[episodeIndex] || nestedParams.get('url') || url;
+                const realVideoUrl = pickEpisodeUrl(episodesList, episodeIndex, nestedParams.get('url') || url);
 
                 playerUrl = `player.html?url=${encodeURIComponent(realVideoUrl)}&title=${encodeURIComponent(title)}&index=${episodeIndex}&position=${Math.floor(playbackPosition || 0)}&returnUrl=${encodeURIComponent(currentPath)}`;
                 if (sourceNameForUrl) playerUrl += `&source=${encodeURIComponent(sourceNameForUrl)}`;
@@ -718,6 +716,16 @@ async function playFromHistory(url, title, episodeIndex, playbackPosition = 0) {
         const simpleUrl = `player.html?url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&index=${episodeIndex}`;
         showVideoPlayer(simpleUrl);
     }
+}
+
+// 从播放历史恢复播放地址时，取该集「当前可播」的地址。
+// 老历史里存的是「云解析页」地址（HTML 播放页），喂给 hls.js 必然失败；
+// episodesList 来自 /api/detail，已经是可直接播放的地址（自动挑过 m3u8 直链）。
+// episodesList 缺失或索引越界时回落用原来的地址（不比原来差）。
+function pickEpisodeUrl(episodesList, index, fallback) {
+    if (!Array.isArray(episodesList)) return fallback;
+    const picked = episodesList[index];
+    return (typeof picked === 'string' && picked) ? picked : fallback;
 }
 
 // 添加观看历史 - 确保每个视频标题只有一条记录
