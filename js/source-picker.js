@@ -1,8 +1,9 @@
 // ==== 共用选源弹窗 ====
 // 首页「最近更新」点卡片 与 播放器页「切换资源」共用这一个实现：
 //   ① 按片名跨源搜同名候选（复用 search.js 的 searchByAPIAndKeyWord，与搜索页同一套源）
-//   ② 并发测速：两次请求 —— 先请求该源详情，再请求该源的第一个播放地址，
-//      两次的总耗时当速度指标（取不到剧集 → 标成不可用并写明原因）
+//   ② 并发测速：两段分开计时 —— 经本站代理取片单（切源要等多久）、
+//      浏览器直连播放地址（播起来快不快）；排序用直连那段
+//      （取不到片单 → 标成不可用并写明原因）
 //   ③ 排序：当前播放的源置顶，其余按速度从快到慢；测速失败的源留在列表里不静默消失
 //   ④ 渲染源卡片（封面 + 速度角标 + 集数 + 当前播放标记），卡片紧跟标题
 // 点卡片 = 选中该源；「播放此源」或直接点卡片触发的播放动作交给调用方
@@ -110,57 +111,52 @@ async function collectSourcePickerCandidates(title, signal) {
     return found.filter(Boolean);
 }
 
-// 测速一个来源：两次请求 —— ① 该源详情 ② 该源的第一个播放地址，总耗时当速度指标
+// 测速一个来源：两段分开计时 ——
+//   ① 代理取片单（proxyMs）：本站边缘 → 源站 CMS，切到这一源要先等它
+//   ② 直连播放地址（directMs）：用户浏览器 → 源站 CDN，播起来快不快
+// 排序用 ②（直连优先）；②不通时退回 ① 并注明「仅测到片单」——
+// 两种耗时不再混成一个总数，否则边缘开销会把快源压到慢源后面。
 async function testSourcePickerSpeed(sourceKey, vodId, signal) {
-    const started = performance.now();
+    // 失败一律走这个形状：directMs/proxyMs 恒为数字，调用方不用判 undefined
+    const fail = (error, proxyMs = -1) => ({ speed: -1, directMs: -1, proxyMs, error });
     try {
         const params = sourcePickerApiParams(sourceKey);
-        if (!params) return { speed: -1, error: 'API配置无效' };
+        if (!params) return fail('API配置无效');
 
+        const proxyStarted = performance.now();
         const response = await fetch(`/api/detail?id=${encodeURIComponent(vodId)}${params}&_t=${Date.now()}`, {
             method: 'GET',
             cache: 'no-cache',
             signal
         });
-        if (signal.aborted) return { speed: -1, error: '已取消' };
+        if (signal.aborted) return fail('已取消');
 
         const data = await response.json();
+        const proxyMs = Math.round(performance.now() - proxyStarted);
         if (!data || data.code !== 200) {
-            return { speed: -1, error: (data && data.msg) || '获取失败' };
+            return fail((data && data.msg) || '获取失败', proxyMs);
         }
-        // 该源取不到剧集 → 不可用（写明原因，源仍留在列表里）
+        // 本站取不到片单 ≠ 这个源不存在：可能只是没收录或上游接口挂了，如实说清楚
         if (!Array.isArray(data.episodes) || !data.episodes.length) {
-            return { speed: -1, error: '无播放源' };
+            return fail('本站取不到片单', proxyMs);
         }
         const firstUrl = data.episodes[0];
-        if (!firstUrl) return { speed: -1, error: '链接无效' };
+        if (!firstUrl) return fail('链接无效', proxyMs);
 
-        try {
-            await fetch(firstUrl, {
-                method: 'HEAD',
-                mode: 'no-cors',
-                cache: 'no-cache',
-                signal: AbortSignal.any([signal, AbortSignal.timeout(5000)])
-            });
-        } catch (videoError) {
-            if (signal.aborted) return { speed: -1, error: '已取消' };
-            // 播放地址测不通：仍按已耗时算速度，角标注明只测了详情接口
-            return {
-                speed: Math.round(performance.now() - started),
-                episodes: data.episodes.length,
-                error: null,
-                note: 'API响应'
-            };
-        }
+        // 直连播放地址：用户真正要连的那台服务器（不经代理、不碰 KV）
+        const directMs = await probeDirectLatency(firstUrl, signal, 5000);
+        if (signal.aborted) return fail('已取消', proxyMs);
 
         return {
-            speed: Math.round(performance.now() - started),
+            speed: directMs >= 0 ? directMs : proxyMs,
+            directMs,
+            proxyMs,
             episodes: data.episodes.length,
             error: null
         };
     } catch (error) {
-        if (signal.aborted) return { speed: -1, error: '已取消' };
-        return { speed: -1, error: error.name === 'AbortError' ? '超时' : '测试失败' };
+        if (signal.aborted) return fail('已取消');
+        return fail(error.name === 'AbortError' ? '超时' : '测试失败');
     }
 }
 
@@ -211,7 +207,7 @@ function refreshSourcePickerEntry(entry) {
         entry.badge.innerHTML = entry.pending
             ? '<span class="speed-indicator">测速中</span>'
             : formatSpeedDisplay(entry.speed >= 0
-                ? { speed: entry.speed, note: entry.note }
+                ? { speed: entry.speed, directMs: entry.directMs, proxyMs: entry.proxyMs }
                 : { speed: -1, error: escapeText(entry.error || '失败') });
     }
     if (entry.noteEl) {
@@ -283,9 +279,13 @@ function renderSourcePickerDetail() {
         return;
     }
 
+    // 详情面板与角标同一套口径（直连 / 切源），别再显示混算的总数
     const speedText = entry.pending
         ? '测速中...'
-        : (entry.speed >= 0 ? `速度 ${entry.speed}ms` : `速度：${entry.error || '不可用'}`);
+        : (entry.speed >= 0
+            ? `${entry.directMs >= 0 ? `直连 ${entry.directMs}ms` : '仅测到片单'}`
+                + (entry.proxyMs >= 0 ? ` · 切源 ${entry.proxyMs}ms` : '')
+            : `不可用：${entry.error || '测速失败'}`);
 
     detail.innerHTML = `
         <div class="flex items-start gap-3 p-3 bg-[var(--kt-raised)] rounded-lg border border-[var(--kt-line)]">
@@ -366,9 +366,10 @@ function openSourcePicker(options) {
             sourcePickerState.entries = candidates.map(item => ({
                 ...item,
                 speed: -1,
+                directMs: -1,
+                proxyMs: -1,
                 error: '',
                 episodes: 0,
-                note: '',
                 pending: true,
                 isCurrent: !!sourcePickerState.currentSourceKey
                     && item.sourceKey === sourcePickerState.currentSourceKey
@@ -382,9 +383,10 @@ function openSourcePicker(options) {
                 testSourcePickerSpeed(entry.sourceKey, entry.vodId, controller.signal).then(result => {
                     if (!sourcePickerState.open) return;
                     entry.speed = result.speed;
+                    entry.directMs = result.directMs != null ? result.directMs : -1;
+                    entry.proxyMs = result.proxyMs != null ? result.proxyMs : -1;
                     entry.error = result.error || '';
                     entry.episodes = result.episodes || 0;
-                    entry.note = result.note || '';
                     entry.pending = false;
                     refreshSourcePickerEntry(entry);
                 })

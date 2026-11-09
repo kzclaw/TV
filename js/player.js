@@ -90,6 +90,7 @@ let shortcutHintTimeout = null; // 用于控制快捷键提示显示时间
 let adFilteringEnabled = true; // 默认开启广告过滤
 let progressSaveInterval = null; // 定期保存进度的计时器
 let currentVideoUrl = ''; // 记录当前实际的视频URL
+let episodeSpeedSeq = 0; // 节目单直连测速的序号：切集后旧结果要作废
 const isWebkit = (typeof window.webkitConvertPointFromNodeToPage === 'function')
 Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
@@ -232,6 +233,7 @@ function initializePageContent() {
 
     // 更新集数信息
     updateEpisodeInfo();
+    updateEpisodeSpeed();
 
     // 渲染集数列表
     renderEpisodes();
@@ -857,6 +859,24 @@ function updateEpisodeInfo() {
     }
 }
 
+// 当前集的直连测速：浏览器 → 源站，不经本站代理，也不碰 KV。
+// 只测当前集（切集时重测），避免一次性并发打全部集。
+function updateEpisodeSpeed() {
+    const el = document.getElementById('episodeSpeed');
+    if (!el) return;
+    const seq = ++episodeSpeedSeq;
+    const url = (currentEpisodes && currentEpisodes[currentEpisodeIndex]) || '';
+    if (!url) {
+        el.textContent = '';
+        return;
+    }
+    el.textContent = '测速中...';
+    probeDirectLatency(url, null, 5000).then(ms => {
+        if (seq !== episodeSpeedSeq) return;   // 已经切集了，别把上一集的结果写进来
+        el.textContent = ms >= 0 ? `直连 ${ms}ms` : '直连不通';
+    });
+}
+
 // 更新按钮状态
 function updateButtonStates() {
     const prevButton = document.getElementById('prevButton');
@@ -968,6 +988,7 @@ function playEpisode(index) {
 
     // 更新UI
     updateEpisodeInfo();
+    updateEpisodeSpeed();
     updateButtonStates();
     renderEpisodes();
 

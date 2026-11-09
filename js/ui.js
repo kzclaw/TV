@@ -41,7 +41,46 @@ function buildSourceRows(items) {
     }).join('');
 }
 
+// 直连探一个播放地址的延迟：浏览器 → 源站，不经过本站代理（也不碰 KV）。
+// 返回毫秒数；连不通返回 -1。
+// mode:'no-cors' 拿不到状态码，但够分两种情况：
+//   resolve = 连得上（哪怕对方回 403/405，浏览器也照样放行 opaque 响应）
+//   reject  = 连不上（DNS 失败、连接被拒、混合内容被浏览器拦掉）
+// 混合内容那条要特别注意：https 页面里 fetch http:// 地址一定被拦，
+// 于是这类源只能走本站代理 —— 所以「直连不通」不等于「源没了」。
+async function probeDirectLatency(url, signal, timeoutMs) {
+    if (!url || !/^https?:\/\//i.test(url)) return -1;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs || 5000);
+    const onAbort = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const started = performance.now();
+    try {
+        await fetch(url, {
+            method: 'HEAD',
+            mode: 'no-cors',
+            cache: 'no-cache',
+            signal: controller.signal
+        });
+        return Math.round(performance.now() - started);
+    } catch (e) {
+        return -1;
+    } finally {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+    }
+}
+
 // 格式化速度显示（播放器页的「切换资源」与首页的多源弹窗共用同一套角标）
+// speedResult: { speed, directMs, proxyMs, error }
+//   speed    = 排序与配色依据（直连优先；直连不通时退回代理耗时）
+//   directMs = 直连源站的实测延迟（= 播起来快不快，用户真正在意的）
+//   proxyMs  = 经本站代理取片单的耗时（= 切源要等多久，含一段绕地球的边缘开销）
+// 两个数分开显示：直连是播放体验，切源是切换成本，不再混成一个总数。
+// 直连没测通时只写「仅测到片单」，不拿代理耗时冒充播放速度。
 function formatSpeedDisplay(speedResult) {
     if (speedResult.speed === -1) {
         return `<span class="speed-indicator error"><i class="kt-dot" style="background:#C2603E"></i>${speedResult.error}</span>`;
@@ -59,8 +98,9 @@ function formatSpeedDisplay(speedResult) {
         color = '#FBBF24';           // 一般
     }
 
-    const note = speedResult.note ? ` (${speedResult.note})` : '';
-    return `<span class="${className}"><i class="kt-dot" style="background:${color}"></i>${speed}ms${note}</span>`;
+    const direct = speedResult.directMs >= 0 ? `直连 ${speedResult.directMs}ms` : '仅测到片单';
+    const proxy = speedResult.proxyMs >= 0 ? ` · 切源 ${speedResult.proxyMs}ms` : '';
+    return `<span class="${className}"><i class="kt-dot" style="background:${color}"></i>${direct}${proxy}</span>`;
 }
 
 // UI相关函数
