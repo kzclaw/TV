@@ -32,7 +32,10 @@
         <div class="kt-shell">
             <!-- 片名 + 返回：放在播放器上方（顶栏只留标识） -->
             <div class="kt-player-head">
-                <h2 id="videoTitle"></h2>
+                <div class="kt-title-row">
+                    <h2 id="videoTitle"></h2>
+                    <span id="qualityBadge" class="q-badge" hidden></span>
+                </div>
                 <a href="#" id="goBack" onclick="goBack(event)" class="kt-btn home-btn" aria-label="返回">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M19 12H5M11 18l-6-6 6-6"/>

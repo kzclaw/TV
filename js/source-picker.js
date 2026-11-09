@@ -152,6 +152,7 @@ async function testSourcePickerSpeed(sourceKey, vodId, signal) {
             directMs,
             proxyMs,
             episodes: data.episodes.length,
+            playUrl: firstUrl,        // 画质探测用：已是挑过 m3u8 直链的可播放地址
             error: null
         };
     } catch (error) {
@@ -165,10 +166,11 @@ function sourcePickerCardHtml(entry) {
     const key = sourcePickerEntryKey(entry);
     const currentClass = entry.isCurrent ? 'current' : '';
     // 侧栏只有 440px 宽 —— 用一行（源名 + 实测延迟）而不是海报网格
+    // 画质徽章紧跟源名文字：名字自己省略，徽章不被挤到行尾（名字是 flex:1，直接排会把徽章顶到速度角标旁边）
     return `
         <div class="kt-pick ${currentClass}" data-source-key="${escapeText(key)}" role="button" tabindex="0"
              title="${escapeText(entry.sourceName)}${entry.isCurrent ? '（当前播放）' : ''}">
-            <span class="nm">${escapeText(entry.name)}${entry.approx ? ' <span class="kt-src-badge approx">近似</span>' : ''}</span>
+            <span class="nm-row"><span class="nm">${escapeText(entry.name)}${entry.approx ? ' <span class="kt-src-badge approx">近似</span>' : ''}</span><span class="q-badge" data-quality-badge hidden></span></span>
             <span class="ms" data-source-badge><span class="speed-indicator">测速中</span></span>
         </div>`;
 }
@@ -186,6 +188,8 @@ function renderSourcePickerGrid() {
         if (!entry) return;
         entry.card = card;
         entry.badge = card.querySelector('[data-source-badge]');
+        entry.qualityBadge = card.querySelector('[data-quality-badge]');
+        renderQualityBadge(entry.qualityBadge, entry.quality);
         entry.noteEl = card.querySelector('[data-source-note]');
         const img = card.querySelector('img');
         if (img) {
@@ -203,6 +207,7 @@ function renderSourcePickerGrid() {
 
 // 回填一个来源的测速结果（只改角标，不重建卡片：重建会让封面重复请求）
 function refreshSourcePickerEntry(entry) {
+    renderQualityBadge(entry.qualityBadge, entry.quality);
     if (entry.badge) {
         entry.badge.innerHTML = entry.pending
             ? '<span class="speed-indicator">测速中</span>'
@@ -292,7 +297,10 @@ function renderSourcePickerDetail() {
             <img src="${escapeText(entry.pic) || LATEST_PLACEHOLDER_IMAGE}" alt=""
                  class="w-14 aspect-[2/3] object-cover rounded shrink-0">
             <div class="flex-1 min-w-0">
-                <div class="text-sm font-semibold text-white truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
+                <div class="kt-pick-name-row">
+                    <div class="text-sm font-semibold text-white truncate" title="${escapeText(entry.sourceName)}">${escapeText(entry.sourceName)}</div>
+                    <span class="q-badge" data-quality-badge hidden></span>
+                </div>
                 <div class="mt-1 text-xs text-gray-400">
                     ${escapeText(speedText)}${entry.episodes ? ` · ${entry.episodes} 集` : ''}
                 </div>
@@ -301,6 +309,9 @@ function renderSourcePickerDetail() {
                 </button>
             </div>
         </div>`;
+
+    // 详情卡里的画质徽章跟列表行是同一份数据（重建了 DOM，重新填一次）
+    renderQualityBadge(detail.querySelector('[data-quality-badge]'), entry.quality);
 
     const img = detail.querySelector('img');
     if (img) {
@@ -318,6 +329,43 @@ function renderSourcePickerDetail() {
             if (onPick) onPick(entry);
         });
     }
+}
+
+// 并发闸：画质探测一次最多 2 个（同时开 8 个 hls 实例会把手机带宽吃光）
+function createLimiter(limit) {
+    let active = 0;
+    const queue = [];
+    const pump = () => {
+        while (active < limit && queue.length) {
+            active++;
+            const job = queue.shift();
+            job.run().then(job.resolve, job.reject).finally(() => { active--; pump(); });
+        }
+    };
+    return run => new Promise((resolve, reject) => {
+        queue.push({ run, resolve, reject });
+        pump();
+    });
+}
+
+const sourcePickerQualityLimiter = createLimiter(2);
+
+// 探测这个源的画质：起一个隐藏 video 实测它自己的分辨率（不是清单声明值）
+function probeSourcePickerQuality(entry, playUrl, signal) {
+    if (!playUrl) {
+        entry.quality = { state: 'failed' };
+        refreshSourcePickerEntry(entry);
+        return;
+    }
+    // 超时给 12s：源站 CDN 冷启动时首个分片可能要 10s 上下（实测同一地址冷 15s 超时、热 4s 出结果），
+    // 超时给小了会把「慢但正常」的源误标成「未测到」
+    sourcePickerQualityLimiter(() => probeVideoQuality(playUrl, signal, 12000)).then(quality => {
+        if (!sourcePickerState.open) return;
+        entry.quality = quality
+            ? { state: 'measured', width: quality.width, height: quality.height }
+            : { state: 'failed' };
+        refreshSourcePickerEntry(entry);
+    });
 }
 
 // 打开选源弹窗
@@ -371,6 +419,7 @@ function openSourcePicker(options) {
                 error: '',
                 episodes: 0,
                 pending: true,
+                quality: { state: 'pending' },
                 isCurrent: !!sourcePickerState.currentSourceKey
                     && item.sourceKey === sourcePickerState.currentSourceKey
                     && item.vodId === sourcePickerState.currentVodId
@@ -389,6 +438,7 @@ function openSourcePicker(options) {
                     entry.episodes = result.episodes || 0;
                     entry.pending = false;
                     refreshSourcePickerEntry(entry);
+                    probeSourcePickerQuality(entry, result.playUrl, controller.signal);
                 })
             )).then(() => {
                 if (!sourcePickerState.open) return;

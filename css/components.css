@@ -348,6 +348,12 @@
 .kt-pick:hover { background: rgba(245, 241, 232, .04); border-color: var(--kt-line); }
 .kt-pick.current { background: var(--kt-brand-soft); border-color: var(--kt-brand-dim); }
 .kt-pick .nm { font-size: 12.5px; color: var(--kt-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 源名 + 画质徽章：同 .kt-title-row 的道理 —— 徽章紧跟文字，名字自己省略 */
+.kt-pick .nm-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.kt-pick .nm-row .nm { flex: 0 1 auto; }
+/* 详情卡（「播放此源」）里的源名行 */
+.kt-pick-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.kt-pick-name-row > div { min-width: 0; }
 .kt-pick .bar { width: 56px; height: 3px; border-radius: 2px; background: rgba(245, 241, 232, .1); overflow: hidden; flex: none; }
 .kt-pick .bar i { display: block; height: 100%; background: var(--kt-brand); }
 .kt-pick .ms { font-family: var(--kt-font-mono); font-size: 11px; color: var(--kt-text-3); min-width: 54px; text-align: right; flex: none; white-space: nowrap; }
@@ -432,6 +438,25 @@
   font-weight: 600; color: var(--kt-text); margin: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 片名 + 画质徽章：徽章必须**紧跟文字**。
+   片名是 flex:1 + ellipsis，所以不能把徽章塞进名字里（长片名会把徽章一起裁掉），
+   也不能让徽章直接当兄弟排（会被 flex:1 的名字顶到行尾、挨着「返回」按钮）。
+   正解：外面套一层 flex:1 的容器，名字改成 flex:0 1 auto 自己省略，徽章 flex:none 贴住文字。 */
+.kt-title-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.kt-player-head .kt-title-row h2 { flex: 0 1 auto; }
+
+/* 画质徽章：播放器片名后 + 换源面板源名后共用同一套外观 */
+.q-badge {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--kt-font-mono); font-size: 10.5px; line-height: 1.7;
+  color: var(--kt-text-2); background: rgba(245, 241, 232, .06);
+  border: 1px solid var(--kt-line); border-radius: 5px; padding: 0 5px;
+  white-space: nowrap;
+}
+.q-badge[hidden] { display: none; }
+.q-badge.ok { color: var(--kt-brand); border-color: var(--kt-brand-dim); background: var(--kt-brand-soft); }
+.q-badge.pending { color: var(--kt-text-3); }
+.q-badge.unknown { color: var(--kt-text-3); border-style: dashed; }
 
 /* 选源面板：整屏遮罩 + 右侧面板（必须盖住播放器，否则会漏出播放器一角） */
 .kt-overlay {

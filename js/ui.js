@@ -103,6 +103,168 @@ function formatSpeedDisplay(speedResult) {
     return `<span class="${className}"><i class="kt-dot" style="background:${color}"></i>${direct}${proxy}</span>`;
 }
 
+// ==== 画质徽章（播放器片名后 + 换源面板源名后共用）====
+//
+// 口径只有一条：**只显示实测值，不显示清单里声明的 RESOLUTION**。
+// 声明值不可信 —— 实测 lzi 声明 1080x608，实际分片是 1280x720；ikun 声明 896x376 才与实际一致；
+// 而且 22 个可达源里有 13 个是 media 清单（根本没有声明值）。拿声明值当画质会把 480P 的片子说成 720P。
+//
+// 分辨率 → 档位只看**短边**：横屏 1920x800 的短边是高度 800，竖屏 720x1280 的短边是宽度 720，
+// 两者落在同一套档位里。分档边界按实测到的真实短边分布定（1080/800/768/720/608/576/376/852）。
+const QUALITY_TIERS = [
+    { min: 1000, label: '1080P' },
+    { min: 700, label: '720P' },
+    { min: 500, label: '480P' },
+    { min: 0, label: '360P' }
+];
+
+// 分辨率 → 档位名；尺寸缺失/非法返回 ''（调用方据此不画徽章）
+function qualityLabel(width, height) {
+    const w = Number(width);
+    const h = Number(height);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return '';
+    const short = Math.min(w, h);
+    for (const tier of QUALITY_TIERS) {
+        if (short >= tier.min) return tier.label;
+    }
+    return '';
+}
+
+// 渲染画质徽章。quality = { state: 'pending'|'measured'|'failed', width, height }
+//   pending  → 「…」（正在探测/起播中）
+//   measured → 档位名（title 里带精确尺寸）
+//   failed   → 「未测到」（探测失败，不当成画质显示）
+// 其它情况 → 不渲染徽章（灰 chip 是噪音）
+function renderQualityBadge(el, quality) {
+    if (!el) return;
+    const q = quality || {};
+    if (q.state === 'measured') {
+        const label = qualityLabel(q.width, q.height);
+        if (!label) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+        el.textContent = label;
+        el.className = 'q-badge ok';
+        el.title = `实测 ${q.width}×${q.height}`;
+        el.hidden = false;
+    } else if (q.state === 'failed') {
+        el.textContent = '未测到';
+        el.className = 'q-badge unknown';
+        el.title = '探测失败（超时或源站不允许跨域读取）';
+        el.hidden = false;
+    } else if (q.state === 'pending') {
+        el.textContent = '…';
+        el.className = 'q-badge pending';
+        el.title = '正在探测画质';
+        el.hidden = false;
+    } else {
+        el.textContent = '';
+        el.className = 'q-badge';
+        el.title = '';
+        el.hidden = true;
+    }
+}
+
+// hls.js 按需加载：播放器页已经在 <script> 里引了，首页没有 —— 只在真要探测时才拉一次
+function ensureHlsLib() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (window.__ktHlsPromise) return window.__ktHlsPromise;
+    window.__ktHlsPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'libs/hls.min.js';
+        script.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error('hls.js 未就绪')));
+        script.onerror = () => reject(new Error('hls.js 加载失败'));
+        document.head.appendChild(script);
+    });
+    return window.__ktHlsPromise;
+}
+
+// 探测一条 m3u8 的**实测**分辨率：起一个隐藏 <video>，等 metadata 出来读 videoWidth/videoHeight。
+// 为什么不在服务端探：Pages 边缘出网被 403 挡着；浏览器直连反而通（实测 22/22 个源的 m3u8 都带 ACAO:*）。
+// 为什么不用清单声明值：见文件头口径说明。
+// 返回 { width, height } 或 null（探测失败/超时/被取消）。
+function probeVideoQuality(url, signal, timeoutMs) {
+    if (!url || !/^https?:\/\//i.test(url)) return Promise.resolve(null);
+
+    return ensureHlsLib().then(HlsLib => {
+        if (signal && signal.aborted) return null;
+
+        const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.setAttribute('aria-hidden', 'true');
+        video.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+        document.body.appendChild(video);
+
+        // capLevelToPlayerSize 必须显式关掉：探测用的 video 只有 2px，
+        // 一旦按播放器尺寸封顶就会把档位压到最低，测出来的是 360P 而不是源的真实档位。
+        const hls = new HlsLib({
+            enableWorker: true,
+            lowLatencyMode: false,
+            startLevel: -1,
+            capLevelToPlayerSize: false,
+            capLevelOnFPSDrop: false,
+            maxBufferLength: 6,
+            backBufferLength: 0
+        });
+
+        return new Promise(resolve => {
+            let done = false;
+            let watch = null;
+            let timer = null;
+            let last = null;
+            let changedAt = Date.now();
+
+            const finish = value => {
+                if (done) return;
+                done = true;
+                if (watch) clearInterval(watch);
+                if (timer) clearTimeout(timer);
+                video.removeEventListener('loadedmetadata', onMeta);
+                video.removeEventListener('resize', onMeta);
+                if (signal) signal.removeEventListener('abort', onAbort);
+                try { hls.destroy(); } catch (e) { }
+                video.remove();
+                resolve(value);
+            };
+
+            // 首个分片可能是广告（实测 yinghua 的第一个分片是广告，正片在 #EXT-X-DISCONTINUITY 之后），
+            // 分辨率会中途变 —— 所以等它**稳定 800ms** 再取最后一次读数，而不是取第一个。
+            function onMeta() {
+                const w = video.videoWidth;
+                const h = video.videoHeight;
+                if (!w || !h) return;
+                if (!last || last.width !== w || last.height !== h) {
+                    last = { width: w, height: h };
+                    changedAt = Date.now();
+                }
+            }
+            function onAbort() { finish(null); }
+
+            video.addEventListener('loadedmetadata', onMeta);
+            video.addEventListener('resize', onMeta);
+            if (signal) {
+                if (signal.aborted) { finish(null); return; }
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
+            hls.on(HlsLib.Events.ERROR, (event, data) => {
+                if (data && data.fatal) finish(null);
+            });
+
+            watch = setInterval(() => {
+                if (last && Date.now() - changedAt > 800) finish(last);
+            }, 200);
+            timer = setTimeout(() => finish(last), timeoutMs || 8000);
+
+            hls.loadSource(url);
+            hls.attachMedia(video);
+        });
+    }).catch(() => null);
+}
+
 // UI相关函数
 function toggleSettings(e) {
     // 阻止事件冒泡，防止触发document的点击事件

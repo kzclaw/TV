@@ -473,6 +473,24 @@ function setupViewportFit() {
     });
 }
 
+// 片名后的画质徽章：起播前占位，测出来就换；
+// 6 秒还没测到就撤掉 —— 视频根本没起来的时候，不该一直挂个「…」在片名旁边
+let qualityBadgeTimer = null;
+function updateQualityBadge(state) {
+    const badge = document.getElementById('qualityBadge');
+    if (qualityBadgeTimer) {
+        clearTimeout(qualityBadgeTimer);
+        qualityBadgeTimer = null;
+    }
+    renderQualityBadge(badge, state);
+    if (state && state.state === 'pending') {
+        qualityBadgeTimer = setTimeout(() => {
+            qualityBadgeTimer = null;
+            renderQualityBadge(badge, null);
+        }, 6000);
+    }
+}
+
 // 初始化播放器
 function initPlayer(videoUrl) {
     if (!videoUrl) {
@@ -484,6 +502,9 @@ function initPlayer(videoUrl) {
         art.destroy();
         art = null;
     }
+
+    // 片名后的画质徽章：切源/换集时先复位成「起播中」，实测出来再填
+    updateQualityBadge({ state: 'pending' });
 
     // 配置HLS.js选项
     const hlsConfig = {
@@ -598,6 +619,16 @@ function initPlayer(videoUrl) {
                     // URL 里不带任何凭据：认证走 HttpOnly cookie（同源自动带）
                     setupHls('/proxy/' + encodeURIComponent(url), true);
                 }
+
+                // 片名后的画质徽章 = **当前这条流实测出来的**分辨率（不是清单声明值）
+                const reportQuality = () => {
+                    const w = video.videoWidth;
+                    const h = video.videoHeight;
+                    if (!w || !h) return;
+                    updateQualityBadge({ state: 'measured', width: w, height: h });
+                };
+                video.addEventListener('loadedmetadata', reportQuality);
+                video.addEventListener('resize', reportQuality);
 
                 // 建立（或重建）HLS 实例
                 function setupHls(sourceUrl, viaProxy) {
