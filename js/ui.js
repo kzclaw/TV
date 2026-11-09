@@ -680,7 +680,9 @@ async function playFromHistory(url, title, episodeIndex, playbackPosition = 0) {
             try {
                 const nestedUrl = new URL(url, window.location.origin);
                 const nestedParams = nestedUrl.searchParams;
-                const realVideoUrl = nestedParams.get('url') || url;
+                // 优先用同步到的最新集数地址：老历史里存的是「云解析页」地址（HTML），
+                // 喂给 hls.js 必然失败；episodesList 来自 /api/detail，已是可直接播放的地址。
+                const realVideoUrl = episodesList[episodeIndex] || nestedParams.get('url') || url;
 
                 playerUrl = `player.html?url=${encodeURIComponent(realVideoUrl)}&title=${encodeURIComponent(title)}&index=${episodeIndex}&position=${Math.floor(playbackPosition || 0)}&returnUrl=${encodeURIComponent(currentPath)}`;
                 if (sourceNameForUrl) playerUrl += `&source=${encodeURIComponent(sourceNameForUrl)}`;

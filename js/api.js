@@ -105,6 +105,25 @@ window.SourceHealth = {
 };
 
 // 按更新时间倒序（新的在前）；时间相同或无法解析时按名称、来源排序
+// 从 CMS 的 vod_play_url 里挑一条能直接喂给 hls.js 的线路（返回集 → URL 的数组）。
+//
+// 为什么要挑：CMS 常给两条线 ——「云解析页」+「m3u8 直链」。
+// 云解析页那条的地址是 HTML 播放页，喂给 hls.js 必然解析失败（拿到的是网页不是 m3u8），
+// 于是「播放」表现为「点了没反应 / 视频加载失败」。
+// 判据用**地址形态**而不是线路名 —— 线路名并不统一
+// （feifan/ffm3u8、liangzi/lzm3u8、dytt/dyttm3u8 都不遵循 xxm3u8 规律）。
+// 一条 m3u8 都挑不出来时沿用第 0 条（与原行为一致，不会更差）。
+function pickPlayLine(vodPlayUrl) {
+    const lines = String(vodPlayUrl || '').split('$$$').map(src => src.split('#').map(ep => {
+        const parts = ep.split('$');
+        // 返回URL部分(通常是第二部分，如果有的话)
+        return parts.length > 1 ? parts[1] : '';
+    }).filter(url => url && (url.startsWith('http://') || url.startsWith('https://'))));
+
+    const m3u8Line = lines.findIndex(list => list.some(u => u.includes('.m3u8')));
+    return m3u8Line >= 0 ? lines[m3u8Line] : (lines[0] || []);
+}
+
 function compareByVodTime(a, b) {
     const timeDiff = parseVodTime(b.vod_time) - parseVodTime(a.vod_time);
     if (timeDiff !== 0) return timeDiff;
@@ -310,21 +329,7 @@ async function handleApiRequest(url, init) {
                 let episodes = [];
                 
                 if (videoDetail.vod_play_url) {
-                    // 分割不同播放源
-                    const playSources = videoDetail.vod_play_url.split('$$$');
-                    
-                    // 提取第一个播放源的集数（通常为主要源）
-                    if (playSources.length > 0) {
-                        const mainSource = playSources[0];
-                        const episodeList = mainSource.split('#');
-                        
-                        // 从每个集数中提取URL
-                        episodes = episodeList.map(ep => {
-                            const parts = ep.split('$');
-                            // 返回URL部分(通常是第二部分，如果有的话)
-                            return parts.length > 1 ? parts[1] : '';
-                        }).filter(url => url && (url.startsWith('http://') || url.startsWith('https://')));
-                    }
+                    episodes = pickPlayLine(videoDetail.vod_play_url);
                 }
                 
                 // 如果没有找到播放地址，尝试使用正则表达式查找m3u8链接
