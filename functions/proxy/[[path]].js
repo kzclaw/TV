@@ -22,6 +22,33 @@ const MEDIA_FILE_EXTENSIONS = [
 const MEDIA_CONTENT_TYPES = ['video/', 'audio/', 'image/'];
 // --- 常量结束 ---
 
+/**
+ * 判断是否媒体文件（视频/音频/图片）：媒体响应不进 KV 缓存。
+ * 分片体积大、几乎不复用，进 KV 只是白吃写额度（免费版 1000 次/天，而且是账号级共享）。
+ */
+export function isMediaFile(url, contentType) {
+    if (contentType) {
+        for (const mediaType of MEDIA_CONTENT_TYPES) {
+            if (contentType.toLowerCase().startsWith(mediaType)) {
+                return true;
+            }
+        }
+    }
+    const urlLower = url.toLowerCase();
+    for (const ext of MEDIA_FILE_EXTENSIONS) {
+        if (urlLower.endsWith(ext) || urlLower.includes(`${ext}?`)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** KV 缓存判定：Range 请求拿到的是片段、媒体文件体积大 → 两者都不进 KV。 */
+export function shouldCacheInKV(url, clientRange, contentType) {
+    if (clientRange) return false;
+    return !isMediaFile(url, contentType);
+}
+
 // ==== SSRF 防护（Cloudflare Pages 等价实现）====
 // 上游（Node 版）靠 node:dns + undici Agent 做连接级防护，Edge runtime 两样都没有，
 // 这里换成 Pages 跑得动的等价物，判定口径与上游 ssrf.ts 保持一致：
@@ -100,6 +127,15 @@ export function isJsonPayload(bytes, contentType) {
         return c === 0x7b || c === 0x5b;                                  // { 或 [
     }
     return false;
+}
+
+/**
+ * 该不该把这次上游响应写进 KV：JSON 不写。
+ * JSON 分支的 TTL 只有 60 秒 → 写完几乎立刻过期，等于用最贵的额度换一份没人看的缓存，
+ * 过期还要再算一次删除。KV 免费额度是账号级共享的，不能这么花。
+ */
+export function shouldWriteToKV(bytes, contentType) {
+    return !isJsonPayload(bytes, contentType);
 }
 
 /** 去掉 IPv6 字面量外层的方括号（"[::1]" → "::1"） */
@@ -628,24 +664,6 @@ export async function onRequest(context) {
         return new TextDecoder('utf-8').decode(bytes);
     }
 
-    // 判断是否是媒体文件 (根据扩展名和 Content-Type) - 这部分在此代理中似乎未使用，但保留
-    function isMediaFile(url, contentType) {
-        if (contentType) {
-            for (const mediaType of MEDIA_CONTENT_TYPES) {
-                if (contentType.toLowerCase().startsWith(mediaType)) {
-                    return true;
-                }
-            }
-        }
-        const urlLower = url.toLowerCase();
-        for (const ext of MEDIA_FILE_EXTENSIONS) {
-            if (urlLower.endsWith(ext) || urlLower.includes(`${ext}?`)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     // 处理 M3U8 中的 #EXT-X-KEY 行 (加密密钥)
     function processKeyLine(line, baseUrl) {
         return line.replace(/URI="([^"]+)"/, (match, uri) => {
@@ -856,7 +874,8 @@ export async function onRequest(context) {
 
         // Range 请求拿到的是片段，不能进缓存（否则后面的完整请求会拿到残缺数据）
         const clientRange = request.headers.get('Range');
-        const cacheable = !!kvNamespace && !clientRange;
+        // 媒体文件也不进缓存：体积大、几乎不复用，白占 KV 的写额度
+        const cacheable = !!kvNamespace && shouldCacheInKV(targetUrl, clientRange);
 
         if (cacheable) {
             try {
@@ -896,11 +915,12 @@ export async function onRequest(context) {
                  const headersToCache = {};
                  responseHeaders.forEach((value, key) => { headersToCache[key.toLowerCase()] = value; });
                  const cacheValue = { body: bytesToBase64(bytes), headers: JSON.stringify(headersToCache) };
-                 // KV 写入的 TTL 也要分类型：JSON（搜索结果 / 最近更新）用短 TTL，
-                 // 否则搜索结果会在 KV 里躺满 24 小时；媒体文件沿用长 TTL。
-                 const kvTtl = isJsonPayload(bytes, contentType) ? JSON_CACHE_TTL : CACHE_TTL;
-                 // 注意 KV 写入限制
-                 waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: kvTtl }));
+                 // JSON（搜索结果 / 最近更新）不写 KV：60 秒 TTL 等于写完就扔，
+                 // 白吃免费额度里的写/删配额（见 shouldWriteToKV）。
+                 if (shouldWriteToKV(bytes, contentType)) {
+                     // 注意 KV 写入限制
+                     waitUntil(kvNamespace.put(cacheKey, JSON.stringify(cacheValue), { expirationTtl: CACHE_TTL }));
+                 }
                  logDebug(`已将原始内容写入缓存: ${targetUrl}`);
             } catch (kvError) {
                  logDebug(`向 KV 写入缓存失败 (${cacheKey}): ${kvError.message}`);
