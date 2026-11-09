@@ -926,6 +926,25 @@ function hookInput() {
 }
 document.addEventListener('DOMContentLoaded', hookInput);
 
+// 详情弹窗的元信息行。
+//
+// remarks（vod_remarks）是**源站自己写的备注**：集数/完结状态（「更新至12集」「全34集」），
+// 或「HD国语」「正片」这类说明 —— 它不是画质。归一后按「备注」展示，
+// 口径与上游 detail-modal 的 metaRows 一致（见 src/lib/remarks.ts）。
+// 提成顶层函数是为了能单测：曾经这里直接标成「画质」，于是「更新至第7集」被当成画质展示。
+function buildDetailFacts(info) {
+    if (!info) return [];
+    const remark = formatRemarks(info.remarks);
+    return [
+        info.type ? ['类型', info.type] : '',
+        info.year ? ['年份', info.year] : '',
+        info.area ? ['地区', info.area] : '',
+        info.director ? ['导演', info.director] : '',
+        info.actor ? ['主演', info.actor] : '',
+        remark ? ['备注', remark] : ''
+    ].filter(Boolean);
+}
+
 // 显示详情 - 修改为支持自定义API
 async function showDetails(id, vod_name, sourceCode, pic) {
     if (!id) {
@@ -992,14 +1011,7 @@ async function showDetails(id, vod_name, sourceCode, pic) {
             if (data.videoInfo) {
                 const info = data.videoInfo;
                 const descriptionText = info.desc ? String(info.desc).replace(/<[^>]+>/g, '').trim() : '';
-                const facts = [
-                    info.type ? ['类型', info.type] : '',
-                    info.year ? ['年份', info.year] : '',
-                    info.area ? ['地区', info.area] : '',
-                    info.director ? ['导演', info.director] : '',
-                    info.actor ? ['主演', info.actor] : '',
-                    info.remarks ? ['画质', info.remarks] : ''
-                ].filter(Boolean);
+                const facts = buildDetailFacts(info);
                 if (facts.length || descriptionText) {
                     detailInfoHtml = `
                         <div class="kt-facts">${facts.map(f =>
