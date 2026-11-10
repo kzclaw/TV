@@ -36,7 +36,7 @@ function boardSelectedKeys() {
         keys = null;
     }
     if (!Array.isArray(keys) || !keys.length) {
-        keys = DEFAULT_SOURCE_KEYS;   // 唯一真源在 config.js
+        keys = getDefaultSourceKeys();   // 唯一真源在 config.js
     }
     return keys;
 }

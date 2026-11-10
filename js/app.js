@@ -1,6 +1,6 @@
 // 全局变量
-// 默认选中资源：默认清单在 config.js 的 DEFAULT_SOURCE_KEYS（唯一真源）
-let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || JSON.stringify(DEFAULT_SOURCE_KEYS));
+// 默认选中资源：默认清单在 config.js 的 getDefaultSourceKeys()（唯一真源，当前是全部源）
+let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || JSON.stringify(getDefaultSourceKeys()));
 let customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
 
 // 添加当前播放的集数索引
@@ -28,8 +28,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 设置默认API选择（如果是第一次加载）
     if (!localStorage.getItem('hasInitializedDefaults')) {
-        // 默认选中资源（都要支持关键词搜索）
-        selectedAPIs = [...DEFAULT_SOURCE_KEYS];
+        // 默认选中资源：全部源（唯一真源在 config.js 的 getDefaultSourceKeys()）
+        selectedAPIs = getDefaultSourceKeys();
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
 
         // 默认选中过滤开关
@@ -1057,6 +1057,9 @@ function openProgramSources(title) {
     if (typeof openSourcePicker !== 'function' || !title) return;
     openSourcePicker({
         title: title,
+        // 最近更新的条目里已经有各源的同片记录（含 listOnly 源 ——
+        // 它们搜不了，但列表接口是通的），一并传给弹窗当候选来源。
+        knownItems: (typeof latestItems !== 'undefined' && Array.isArray(latestItems)) ? latestItems : [],
         onPick: function (entry) {
             if (typeof showDetails === 'function') {
                 showDetails(entry.vodId, entry.name, entry.sourceKey, entry.pic || '');

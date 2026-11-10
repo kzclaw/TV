@@ -4,12 +4,17 @@ const PROXY_URL = '/proxy/';    // 适用于 Cloudflare, Netlify (带重写), Ve
 const SEARCH_HISTORY_KEY = 'videoSearchHistory';
 const MAX_HISTORY_ITEMS = 5;
 
-// 默认启用的源（首次访问、还没在本地存过勾选时用）
-// 4 个都支持关键词搜索（tyyszy 是 listOnly，新用户实际只搜得到 3 个源）
-// ⚠ 这是「默认源」的唯一真源：js/app.js 的初始化与 js/api.js 的「最近更新」兜底都从这里取，
-// 两边各写一份会漂移 —— 曾经因为 api.js 直接读 localStorage（空）而兜底拉了全部 25 个源，
-// 新用户首屏因此打出 75 个代理请求。
-const DEFAULT_SOURCE_KEYS = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
+// 默认启用的源（首次访问、还没在本地存过勾选时用）：**全部源**。
+// ⚠ 这是「默认源」的唯一真源：js/app.js 的初始化、js/board.js 的状态板、
+// js/source-picker.js 的选源候选都从这里取 —— 三处各写一份会漂移
+// （source-picker.js 曾手抄过一份 ['dyttzy','bfzy','ruyi','ffzy']，改这里它不会跟着变）。
+//
+// 全部源默认开启的代价（2026-11-11 实测）：搜索的代理请求 8 → 25（3.1×），
+// 耗时 2.1s → 3.3s，结果从「13 部影片·来自 4 个来源」变成「15 部·来自 17 个来源」。
+// 多数源第一页就有结果，浏览器 6 个连接槽的排队能消化掉增量 → 换来的覆盖面更划算。
+//
+// ⚠ 必须放在 API_SITES 之后定义（要由它派生），且不能用 Object.keys 的快照 —
+// js/customer_site.js 会在运行时 extendAPISites 追加源，快照会漏掉新加的。
 
 // API站点配置
 // 注意：ruyi/xiaomaomi/heimuer/iqiyi/mozhua/wwzy/ikun/wolong/hwba 这 9 个 key 是历史遗留名
@@ -139,6 +144,12 @@ function extendAPISites(newSites) {
 // 暴露到全局
 window.API_SITES = API_SITES;
 window.extendAPISites = extendAPISites;
+
+// 默认启用的源 = 当前全部源（函数而不是常量快照：源清单会变，
+// 快照会在新增源时静默漏掉它 —— 那正是「初始状态启用所有源」这个要求要防的事）。
+function getDefaultSourceKeys() {
+    return Object.keys(API_SITES).filter(key => key !== 'aggregated' && key !== 'custom');
+}
 
 
 // 抽象API请求配置

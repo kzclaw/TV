@@ -919,6 +919,10 @@ function createLatestCard(group) {
             if (typeof openSourcePicker !== 'function') return;
             openSourcePicker({
                 title: group.name || title,
+                // 这一组里已经取到的条目（含各源的 source_code / vod_id）：
+                // 传进去让弹窗能列出「搜不到但确实有这部片」的源 ——
+                // 典型是 listOnly 源（关键词搜索接口不可用，但最近更新已把它们取回）。
+                knownItems: group.items || [],
                 // 选中后走现有的详情/播放流程（app.js 的 showDetails）
                 onPick: entry => {
                     if (typeof showDetails === 'function') {

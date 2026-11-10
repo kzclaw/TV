@@ -17,7 +17,8 @@ const sourcePickerState = {
     onPick: null,          // 播放动作：首页开详情页 / 播放器切源
     clickToPlay: false,    // 点卡片直接播放（播放器用）；否则点卡片只选中
     currentSourceKey: '',
-    currentVodId: ''
+    currentVodId: '',
+    knownItems: []         // 调用方已知的同片条目（首页最近更新的聚合结果）
 };
 
 // 来源在弹窗里的稳定标识：测速结果会重排，绑下标会指错源
@@ -47,7 +48,10 @@ function getSourcePickerOptions() {
         keys = null;
     }
     if (!Array.isArray(keys) || !keys.length) {
-        keys = ['dyttzy', 'bfzy', 'ruyi', 'ffzy'];
+        // 唯一真源在 config.js 的 getDefaultSourceKeys()（别再手抄一份 —— 改那边它不会跟着变）
+        keys = typeof getDefaultSourceKeys === 'function'
+            ? getDefaultSourceKeys()
+            : Object.keys(window.API_SITES || {});
     }
     const sites = window.API_SITES || {};
     return keys.map(key => {
@@ -73,14 +77,62 @@ function sourcePickerApiParams(sourceKey) {
     return `&source=${encodeURIComponent(sourceKey)}`;
 }
 
+// 档位判定：归一后完全相等 = A 档；前缀匹配 = B 档（近似）。
+// 与搜索候选用同一套口径，两路来源才能合并去重。
+function sourcePickerMatchTier(name, query) {
+    const n = normalizeTitle(name);
+    if (n === query) return 'A';
+    if (n.startsWith(query)) return 'B';
+    return '';
+}
+
+// 「最近更新」已经把这些源的条目取回来了（含 source_code / vod_id / 播放地址），
+// 而 listOnly 源的关键词搜索接口本身不可用 —— 它们的候选只能从这里取。
+// 命中规则与搜索候选一致（A 档相等 / B 档前缀），所以两路来源可以合并去重。
+function collectKnownSourceCandidates(title, knownItems) {
+    if (!Array.isArray(knownItems) || !knownItems.length) return [];
+    const query = normalizeTitle(title);
+    const best = new Map();          // sourceKey -> {item, tier}
+
+    knownItems.forEach(item => {
+        if (!item || !item.source_code) return;
+        const tier = sourcePickerMatchTier(item.vod_name, query);
+        if (!tier) return;
+        const key = item.source_code;
+        const prev = best.get(key);
+        // A 档优先；同为 A 档时保留先到的（同一源同一部片只出一个候选）
+        if (!prev || (tier === 'A' && prev.tier !== 'A')) {
+            best.set(key, { item, tier });
+        }
+    });
+
+    const sites = window.API_SITES || {};
+    return Array.from(best.entries()).map(([sourceKey, rec]) => {
+        const item = rec.item;
+        return {
+            sourceKey,
+            sourceName: (sites[sourceKey] && sites[sourceKey].name) || item.source_name || sourceKey,
+            vodId: String(item.vod_id || ''),
+            name: item.vod_name || title,
+            pic: item.vod_pic || '',
+            approx: rec.tier === 'B',
+            // 标记：这条候选来自已知数据，不需要再跨源搜一次
+            fromKnown: true
+        };
+    });
+}
+
 // 跨源搜同名候选，两档：
 //   A 档 = 归一后完全相等（「庆余年」）；B 档 = 归一后前缀匹配（「庆余年 第二季」「小偷 HD」「小偷[电影解说]」）
 // C 档（既不相等也不是前缀）不展示——以前只认原文完全相等，「小偷 HD」这类修饰名版本会让整个源消失；
 // B 档单列并标注「近似」，不与 A 档合并（避免把两部片子当成一部、播到错的内容）。
-async function collectSourcePickerCandidates(title, signal) {
+// knownItems：调用方已知的同片条目（如首页最近更新的聚合结果）。
+//   它的作用是补上「搜不到但确实有这部片」的源 —— 典型就是 listOnly 源：
+//   它们的关键词搜索接口不可用，但最近更新已经把它们取回来了。
+async function collectSourcePickerCandidates(title, signal, knownItems) {
     const options = getSourcePickerOptions();
     const query = normalizeTitle(title);
-    const found = await Promise.all(options.map(async opt => {
+    const searched = await Promise.all(options.map(async opt => {
         const outcome = await searchByAPIAndKeyWord(opt.key, title, signal);
         const list = outcome && outcome.list;
         if (!list || !list.length) return null;
@@ -88,11 +140,11 @@ async function collectSourcePickerCandidates(title, signal) {
         let hit = null;
         let tier = '';
         list.forEach(item => {
-            const name = normalizeTitle(item && item.vod_name);
-            if (name === query) {
+            const t = sourcePickerMatchTier(item && item.vod_name, query);
+            if (t === 'A') {
                 hit = item;
                 tier = 'A';
-            } else if (!tier && name.startsWith(query)) {
+            } else if (t === 'B' && !tier) {
                 hit = item;
                 tier = 'B';
             }
@@ -108,7 +160,15 @@ async function collectSourcePickerCandidates(title, signal) {
             approx: tier === 'B'
         };
     }));
-    return found.filter(Boolean);
+
+    const fromSearch = searched.filter(Boolean);
+    const fromKnown = collectKnownSourceCandidates(title, knownItems);
+
+    // 两路合并：同一源只留一条（搜索结果优先 —— 它是现搜的，更贴近当前片名）
+    const merged = new Map();
+    fromKnown.forEach(c => merged.set(c.sourceKey, c));
+    fromSearch.forEach(c => merged.set(c.sourceKey, c));
+    return Array.from(merged.values());
 }
 
 // 测速一个来源：两段分开计时 ——
@@ -393,6 +453,8 @@ function openSourcePicker(options) {
     sourcePickerState.clickToPlay = !!opts.clickToPlay;
     sourcePickerState.currentSourceKey = opts.currentSourceKey ? String(opts.currentSourceKey) : '';
     sourcePickerState.currentVodId = opts.currentVodId ? String(opts.currentVodId) : '';
+    // 调用方已知的同片条目：用于补上「搜不到但确实有这部片」的源（listOnly 源）
+    sourcePickerState.knownItems = Array.isArray(opts.knownItems) ? opts.knownItems : [];
     sourcePickerState.open = true;
     sourcePickerState.selectedKey = '';
 
@@ -415,7 +477,7 @@ function openSourcePicker(options) {
     const controller = new AbortController();
     sourcePickerState.controller = controller;
 
-    collectSourcePickerCandidates(pickerTitle, controller.signal)
+    collectSourcePickerCandidates(pickerTitle, controller.signal, sourcePickerState.knownItems)
         .then(candidates => {
             // 弹窗已关闭：不启动测速，避免关闭后还有请求在飞
             if (!sourcePickerState.open) return;
