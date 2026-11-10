@@ -155,6 +155,27 @@ function rankSearchGroups(groups, query) {
         .map(entry => Object.assign({}, entry.group, { tier: entry.tier }));
 }
 
+/**
+ * 搜索结果的排序档位：relevance（最相关）/ time（最新）/ sources（源最多）。
+ * 只换顺序、不换结果集 —— 换档不会把不相关的片塞进来（相关性分档已经滤掉了它们）。
+ * 并列项靠 Array.sort 的稳定性保留原序（传进来时已是相关性序）。
+ */
+function sortSearchGroups(groups, mode) {
+    const list = (groups || []).slice();
+    if (mode === 'time') {
+        // 最新：年份新的在前 → 更新时间新的在前 → 源多的在前
+        list.sort((a, b) => (groupYear(b) - groupYear(a))
+            || (groupLatestTime(b) - groupLatestTime(a))
+            || (b.sourceCount - a.sourceCount));
+    } else if (mode === 'sources') {
+        // 源最多：来源多的在前 → 年份新的在前
+        list.sort((a, b) => (b.sourceCount - a.sourceCount)
+            || (groupYear(b) - groupYear(a)));
+    }
+    // relevance：保持传入的原序（已按相关性排好）
+    return list;
+}
+
 // ==== 备注（vod_remarks）归一 ====
 // 该字段由各源自由填写，只归一「集数」与「完结状态」两类，
 // 其余（HD国语 / 正片 / 年份等）原样保留——它们不是集数信息，强行改写只会把内容丢掉。
@@ -348,6 +369,7 @@ globalThis.Aggregation = {
     parseYear,
     searchRelevanceTier,
     rankSearchGroups,
+    sortSearchGroups,
     formatRemarks,
     compactRemarks,
     inferGroupRemarks

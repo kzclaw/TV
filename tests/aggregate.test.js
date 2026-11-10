@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 require('../js/aggregate.js');
 
-const { aggregateResults, normalizeTitle, formatRemarks, inferGroupRemarks } = globalThis.Aggregation;
+const { aggregateResults, normalizeTitle, formatRemarks, inferGroupRemarks, sortSearchGroups } = globalThis.Aggregation;
 
 const item = (name, year, source, id, extra) => Object.assign({
     vod_name: name,
@@ -172,6 +172,55 @@ const item = (name, year, source, id, extra) => Object.assign({
     ]);
     assert.equal(groups.length, 1, '"0" 与空年份应视为同一年份');
     assert.equal(groups[0].year, '', '"0" 不是年份，应归到无年份');
+}
+
+// 15) 排序档位：最相关 / 最新 / 源最多（搜索结果页那三个按钮）
+{
+    const groups = aggregateResults([
+        item('大侦探', '1988', 'ruyi', '1', { vod_time: '2024-01-01 00:00:00' }),
+        item('大侦探', '1988', 'zuid', '2', { vod_time: '2024-02-01 00:00:00' }),
+        item('大侦探', '1988', 'baidu', '3', { vod_time: '2024-03-01 00:00:00' }),
+        item('大侦探第十一季', '2026', 'ruyi', '4', { vod_time: '2025-01-01 00:00:00' }),
+        item('名侦探柯南', '1996', 'ruyi', '5', { vod_time: '2026-01-01 00:00:00' })
+    ]);
+
+    // 最新：年份新的在前
+    const byTime = sortSearchGroups(groups, 'time');
+    assert.deepEqual(byTime.map(g => g.year), ['2026', '1996', '1988'],
+        '「最新」应按年份倒序');
+    assert.equal(byTime[0].name, '大侦探第十一季');
+
+    // 源最多：来源多的在前（3 源 > 1 源）
+    const bySources = sortSearchGroups(groups, 'sources');
+    assert.equal(bySources[0].sourceCount, 3, '「源最多」应把 3 源的排在最前');
+    assert.equal(bySources[0].name, '大侦探');
+    assert.equal(bySources.filter(g => g.sourceCount === 1).length, 2);
+
+    // 最相关：保持传入原序
+    assert.deepEqual(sortSearchGroups(groups, 'relevance').map(g => g.name),
+        groups.map(g => g.name), '「最相关」不应改变顺序');
+
+    // 并列时：最新 → 更新时间新的在前；源最多 → 年份新的在前
+    const tie = [
+        { name: 'A', year: '2020', sourceCount: 1, items: [{ vod_time: '2024-01-01 00:00:00' }] },
+        { name: 'B', year: '2020', sourceCount: 1, items: [{ vod_time: '2025-01-01 00:00:00' }] }
+    ];
+    assert.deepEqual(sortSearchGroups(tie, 'time').map(g => g.name), ['B', 'A'],
+        '年份相同时应按更新时间新的在前');
+    const tie2 = [
+        { name: 'A', year: '2020', sourceCount: 2, items: [] },
+        { name: 'B', year: '2026', sourceCount: 2, items: [] }
+    ];
+    assert.deepEqual(sortSearchGroups(tie2, 'sources').map(g => g.name), ['B', 'A'],
+        '源数相同时应按年份新的在前');
+
+    // 不改原数组（重排后原数组仍是相关性序，否则来回切档会漂）
+    const before = groups.map(g => g.name).join(',');
+    sortSearchGroups(groups, 'time');
+    assert.equal(groups.map(g => g.name).join(','), before, '排序不该改动传入的数组');
+
+    // 空输入不炸
+    assert.deepEqual(sortSearchGroups(null, 'time'), []);
 }
 
 console.log('aggregate.test.js: 全部断言通过 ✓');

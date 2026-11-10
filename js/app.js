@@ -12,6 +12,11 @@ let currentVideoTitle = '';
 // 全局变量用于倒序状态
 let episodesReversed = false;
 
+// 搜索结果排序档位：relevance（最相关，默认）/ time（最新）/ sources（源最多）
+let searchSortMode = 'relevance';
+// 最近一次搜索的分组（相关性序）；换排序只重排它，不重新搜索
+let lastSearchGroups = null;
+
 // 页面初始化
 document.addEventListener('DOMContentLoaded', function () {
     // 初始化API复选框
@@ -501,6 +506,18 @@ function setupEventListeners() {
         });
     }
 
+    // 搜索结果排序按钮（最相关 / 最新 / 源最多）：按 id 单独绑定，
+    // 这样审计能逐个确认「每个静态按钮都有人接」（事件委托的话 id 不会出现在脚本里，审计查不出来）
+    const sortRelevance = document.getElementById('sortRelevance');
+    const sortTime = document.getElementById('sortTime');
+    const sortSources = document.getElementById('sortSources');
+    [sortRelevance, sortTime, sortSources].forEach(function (btn) {
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+            applySearchSort(btn.getAttribute('data-sort'));
+        });
+    });
+
     // 点击外部关闭设置面板和历史记录面板
     document.addEventListener('click', function (e) {
         // 关闭设置面板
@@ -683,12 +700,19 @@ function applyYellowFilter(items) {
 
 // 渲染结果卡片（搜索与最近更新共用同一套渲染）
 function renderResults(items, query) {
-    const resultsDiv = document.getElementById('results');
+    const aggregated = aggregateResults(items);
 
     // 同一部片在多个源的同名条目聚成一组，只出一张卡；
     // 搜索时再按相关性分档：A 档（归一后完全相等）→ B 档（归一后前缀匹配，标「近似」）→ C 档不展示
-    const aggregated = aggregateResults(items);
-    const groups = query ? rankSearchGroups(aggregated, query) : aggregated;
+    lastSearchGroups = query ? rankSearchGroups(aggregated, query) : aggregated;
+
+    // 按当前排序档位出图（默认「最相关」）
+    renderSearchGroups(sortSearchGroups(lastSearchGroups, searchSortMode));
+}
+
+// 画一组搜索结果卡片（换排序时只重排已有分组，不重新搜索）
+function renderSearchGroups(groups) {
+    const resultsDiv = document.getElementById('results');
 
     // 更新结果计数（影片数 + 去重后的来源数）
     const searchResultsCount = document.getElementById('searchResultsCount');
@@ -761,6 +785,21 @@ function renderResults(items, query) {
     }).join('');
 
     resultsDiv.innerHTML = safeResults;
+}
+
+// 切换搜索结果排序档位：只重排已有结果，不重新搜索
+function applySearchSort(mode) {
+    searchSortMode = mode;
+
+    // 选中态跟着走（.on 是 CSS 里已定义的高亮样式）
+    document.querySelectorAll('#sortSeg button[data-sort]').forEach(function (btn) {
+        const on = btn.getAttribute('data-sort') === mode;
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+
+    if (!lastSearchGroups) return;
+    renderSearchGroups(sortSearchGroups(lastSearchGroups, mode));
 }
 
 // 搜索完成后提示没响应的源：一个源挂掉不该让整次搜索静默失败

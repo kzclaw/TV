@@ -203,5 +203,31 @@ assert.ok(defsIn('js/ui.js').has('syncToggleVisual'), '开关的视觉反馈应�
 assert.ok(defsIn('js/ui.js').has('initSettingSwitches'), '三个开关的初始化应在共享层 ui.js');
 assert.ok(!defsIn('js/app.js').has('initSettingSwitches'), 'app.js 不该再留一份开关初始化');
 
+// ============ ⑥ 静态 HTML 里的按钮必须有人接（不能只是「看着像能点」） ============
+// 搜索页那三个排序按钮（最相关/最新/源最多）就是这么死的：标记写在 HTML 里、
+// CSS 里连高亮态都备好了，却没有一行 JS 绑它们 → 点了毫无反应。
+// 判据（要能区分「声明过」和「真的绑了」，否则会假绿）：
+//   静态 <button> 必须有 id，且本页加载的某个脚本里有字面量 getElementById('<id>')
+//   或 querySelector('#<id>')，并且那个脚本确实绑了 click。
+for (const page of ['index.html', 'player.html', 'about.html']) {
+    const html = read(page);
+    const scripts = scriptsOf(page).map(s => 'js/' + s);
+    for (const m of html.matchAll(/<button\b[^>]*>/g)) {
+        const tag = m[0].replace(/\s+/g, ' ');
+        if (/onclick\s*=/.test(tag)) continue;               // 行内 onclick 已接
+        if (/type\s*=\s*["']submit["']/.test(tag)) continue;  // 表单提交
+        const id = (tag.match(/\bid\s*=\s*["']([^"']+)["']/) || [])[1];
+        assert.ok(id, `${page}：静态按钮 ${tag.slice(0, 90)} 没有 id —— 没有 id 就没法证明有人接它`);
+        const bound = scripts.some(f => {
+            const src = read(f);
+            const referenced = src.includes(`getElementById('${id}')`) || src.includes(`getElementById("${id}")`)
+                || src.includes(`querySelector('#${id}')`) || src.includes(`querySelector("#${id}")`);
+            return referenced && /addEventListener\(\s*['"]click['"]/.test(src);
+        });
+        assert.ok(bound,
+            `${page}：静态按钮 ${tag.slice(0, 90)} 没人接 —— 本页脚本里没有对 '${id}' 的 click 绑定（点了不会有反应）`);
+    }
+}
+
 console.log(`能力审计通过：${injected.length} 个会被渲染的模板，各页面的 onclick 目标均可用或被隐藏`);
 if (deadOwners.length) console.log(`（提示：以下函数无人调用，其模板不纳入审计 —— ${deadOwners.join('、')}）`);
