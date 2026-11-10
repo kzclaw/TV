@@ -1084,8 +1084,60 @@ toggleSettings = function(e) {
     }
 };
 
+// ===================== 设置面板的开关（三个页面通用） =====================
+// 统一管「初始状态 + 落库 + 视觉反馈」：
+//   · 以前只有「首页显示最近更新」有视觉反馈（api.js 里单独写的），另两个开关点了滑块不动 → 看着像坏了；
+//   · 播放页不加载 app.js，黄色过滤 / 广告过滤这两个开关连处理器都没有，开关状态还是默认值 ——
+//     而「分片广告过滤」恰恰是**播放器的功能**，最该能在播放页上切。
+
+// 开关的视觉反馈（底色 + 圆点）——三个开关共用这一份
+function syncToggleVisual(toggle) {
+    const bg = toggle.nextElementSibling;
+    const dot = bg && bg.nextElementSibling;
+    if (!bg || !dot) return;
+    if (toggle.checked) {
+        bg.classList.add('bg-pink-600');
+        dot.classList.add('translate-x-6');
+    } else {
+        bg.classList.remove('bg-pink-600');
+        dot.classList.remove('translate-x-6');
+    }
+}
+
+function initSettingSwitches() {
+    // 黄色内容过滤
+    const yellow = document.getElementById('yellowFilterToggle');
+    if (yellow) {
+        yellow.checked = localStorage.getItem('yellowFilterEnabled') === 'true';
+        syncToggleVisual(yellow);
+        yellow.addEventListener('change', function (e) {
+            localStorage.setItem('yellowFilterEnabled', e.target.checked);
+            syncToggleVisual(yellow);
+            const adultdiv = document.getElementById('adultdiv');
+            if (adultdiv) {
+                adultdiv.style.display = e.target.checked ? 'none' : '';
+            } else if (typeof addAdultAPI === 'function') {
+                addAdultAPI();          // 成人源列表只有首页有
+            }
+        });
+    }
+
+    // 分片广告过滤（播放器读它）
+    const ad = document.getElementById('adFilterToggle');
+    if (ad) {
+        ad.checked = localStorage.getItem(PLAYER_CONFIG.adFilteringStorage) !== 'false';
+        syncToggleVisual(ad);
+        ad.addEventListener('change', function (e) {
+            localStorage.setItem(PLAYER_CONFIG.adFilteringStorage, e.target.checked);
+            syncToggleVisual(ad);
+        });
+    }
+}
+
 // 点击外部关闭历史面板
 document.addEventListener('DOMContentLoaded', function() {
+    initSettingSwitches();
+
     document.addEventListener('click', function(e) {
         const historyPanel = document.getElementById('historyPanel');
         const historyButton = document.querySelector('button[onclick="toggleHistory(event)"]');
@@ -1264,4 +1316,230 @@ function showImportBox(fun) {
     fileInput.addEventListener('change', (e) => {
         fun(fileInput.files[0]);
     });
+}
+
+
+// ===================== 配置导入 / 导出（三个页面共用） =====================
+// sha256 的唯一实现是 js/sha256.js（ES module，服务端 functions/auth.js 也在用）。
+// 浏览器端是经典脚本 → 用动态 import 复用同一份，不另写一套哈希实现。
+// 路径相对本脚本位置（js/ui.js → js/sha256.js），不依赖页面 URL。
+async function sha256Hex(message) {
+    const m = await import('./sha256.js');
+    return m.sha256(message);
+}
+
+// 从URL导入配置
+async function importConfigFromUrl() {
+    // 创建模态框元素
+    let modal = document.getElementById('importUrlModal');
+    if (modal) {
+        document.body.removeChild(modal);
+    }
+
+    modal = document.createElement('div');
+    modal.id = 'importUrlModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40';
+
+    modal.innerHTML = `
+        <div class="bg-[#191919] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto relative">
+            <button id="closeUrlModal" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">&times;</button>
+            
+            <h3 class="text-xl font-bold mb-4">从URL导入配置</h3>
+            
+            <div class="mb-4">
+                <input type="text" id="configUrl" placeholder="输入配置文件URL" 
+                       class="w-full px-3 py-2 bg-[#222] border border-[#333] rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+            </div>
+            
+            <div class="flex justify-end space-x-2">
+                <button id="confirmUrlImport" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">导入</button>
+                <button id="cancelUrlImport" class="bg-[#444] hover:bg-[#555] text-white px-4 py-2 rounded">取消</button>
+            </div>
+        </div>`;
+
+    document.body.appendChild(modal);
+
+    // 关闭按钮事件
+    document.getElementById('closeUrlModal').addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+
+    // 取消按钮事件
+    document.getElementById('cancelUrlImport').addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+
+    // 确认导入按钮事件
+    document.getElementById('confirmUrlImport').addEventListener('click', async () => {
+        const url = document.getElementById('configUrl').value.trim();
+        if (!url) {
+            showToast('请输入配置文件URL', 'warning');
+            return;
+        }
+
+        // 验证URL格式
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+                showToast('URL必须以http://或https://开头', 'warning');
+                return;
+            }
+        } catch (e) {
+            showToast('URL格式不正确', 'warning');
+            return;
+        }
+
+        showLoading('正在从URL导入配置...');
+
+        try {
+            // 获取配置文件 - 直接请求URL
+            const response = await fetch(url, {
+                mode: 'cors',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            if (!response.ok) throw '获取配置文件失败';
+
+            // 验证响应内容类型
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw '响应不是有效的JSON格式';
+            }
+
+            const config = await response.json();
+            if (config.name !== 'KzTv-Settings' && config.name !== 'LibreTV-Settings') throw '配置文件格式不正确';
+
+            // 验证哈希
+            const dataHash = await sha256Hex(JSON.stringify(config.data));
+            if (dataHash !== config.hash) throw '配置文件哈希值不匹配';
+
+            // 导入配置
+            for (let item in config.data) {
+                localStorage.setItem(item, config.data[item]);
+            }
+
+            showToast('配置文件导入成功，3 秒后自动刷新本页面。', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } catch (error) {
+            const message = typeof error === 'string' ? error : '导入配置失败';
+            showToast(`从URL导入配置出错 (${message})`, 'error');
+        } finally {
+            hideLoading();
+            document.body.removeChild(modal);
+        }
+    });
+
+    // 点击模态框外部关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            document.body.removeChild(modal);
+        }
+    });
+}
+
+// 配置文件导入功能
+async function importConfig() {
+    showImportBox(async (file) => {
+        try {
+            // 检查文件类型
+            if (!(file.type === 'application/json' || file.name.endsWith('.json'))) throw '文件类型不正确';
+
+            // 检查文件大小
+            if (file.size > 1024 * 1024 * 10) throw new Error('文件大小超过 10MB');
+
+            // 读取文件内容
+            const content = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject('文件读取失败');
+                reader.readAsText(file);
+            });
+
+            // 解析并验证配置
+            const config = JSON.parse(content);
+            if (config.name !== 'KzTv-Settings' && config.name !== 'LibreTV-Settings') throw '配置文件格式不正确';
+
+            // 验证哈希
+            const dataHash = await sha256Hex(JSON.stringify(config.data));
+            if (dataHash !== config.hash) throw '配置文件哈希值不匹配';
+
+            // 导入配置
+            for (let item in config.data) {
+                localStorage.setItem(item, config.data[item]);
+            }
+
+            showToast('配置文件导入成功，3 秒后自动刷新本页面。', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } catch (error) {
+            const message = typeof error === 'string' ? error : '配置文件格式错误';
+            showToast(`配置文件读取出错 (${message})`, 'error');
+        }
+    });
+}
+
+// 配置文件导出功能
+async function exportConfig() {
+    // 存储配置数据
+    const config = {};
+    const items = {};
+
+    const settingsToExport = [
+        'selectedAPIs',
+        'customAPIs',
+        'yellowFilterEnabled',
+        'adFilteringEnabled',
+        'latestEnabled',
+        'hasInitializedDefaults'
+    ];
+
+    // 导出设置项
+    settingsToExport.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value !== null) {
+            items[key] = value;
+        }
+    });
+
+    // 导出历史记录
+    const viewingHistory = localStorage.getItem('viewingHistory');
+    if (viewingHistory) {
+        items['viewingHistory'] = viewingHistory;
+    }
+
+    const searchHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
+    if (searchHistory) {
+        items[SEARCH_HISTORY_KEY] = searchHistory;
+    }
+
+    const times = Date.now().toString();
+    config['name'] = 'KzTv-Settings';  // 配置文件名，用于校验
+    config['time'] = times;               // 配置文件生成时间
+    config['cfgVer'] = '1.0.0';           // 配置文件版本
+    config['data'] = items;               // 配置文件数据
+    config['hash'] = await sha256Hex(JSON.stringify(config['data']));  // 计算数据的哈希值，用于校验
+
+    // 将配置数据保存为 JSON 文件
+    saveStringAsFile(JSON.stringify(config), 'KzTv-Settings_' + times + '.json');
+}
+
+// 将字符串保存为文件
+function saveStringAsFile(content, fileName) {
+    // 创建Blob对象并指定类型
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    // 生成临时URL
+    const url = window.URL.createObjectURL(blob);
+    // 创建<a>标签并触发下载
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    // 清理临时对象
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
 }

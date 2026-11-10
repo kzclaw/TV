@@ -1079,26 +1079,12 @@ function initLatestUpdates() {
         if (toggle) {
             const isEnabled = isLatestEnabled();
             toggle.checked = isEnabled;
-
-            const toggleBg = toggle.nextElementSibling;
-            const toggleDot = toggleBg.nextElementSibling;
-            if (isEnabled) {
-                toggleBg.classList.add('bg-pink-600');
-                toggleDot.classList.add('translate-x-6');
-            }
+            syncToggleVisual(toggle);       // 视觉反馈与另外两个开关共用一份实现（ui.js）
 
             toggle.addEventListener('change', function (e) {
                 const isChecked = e.target.checked;
                 localStorage.setItem('latestEnabled', isChecked);
-
-                if (isChecked) {
-                    toggleBg.classList.add('bg-pink-600');
-                    toggleDot.classList.add('translate-x-6');
-                } else {
-                    toggleBg.classList.remove('bg-pink-600');
-                    toggleDot.classList.remove('translate-x-6');
-                }
-
+                syncToggleVisual(toggle);
                 updateLatestVisibility();
             });
         }

@@ -105,7 +105,7 @@
             </div>
 
             <!-- 自定义API -->
-            <div class="p-3 bg-[var(--kt-raised)] rounded-lg">
+            <div class="kt-custom-api-group p-3 bg-[var(--kt-raised)] rounded-lg">
                 <div class="flex justify-between items-center mb-2">
                     <label class="block text-sm font-medium text-gray-400 border-b border-[var(--kt-line)] w-full pb-1">自定义API</label>
                     <button onclick="showAddCustomApiForm()" class="kt-icon-btn" style="width:26px;height:26px" type="button" aria-label="添加自定义API">+</button>

@@ -75,10 +75,13 @@ jobs:
           # 白名单：
           #   LICENSE               —— AGPL §5(d) 来源声明 + AGPL 全文
           #   README.md / about.html —— 来源声明与 Corresponding Source 提供方式
-          #   js/app.js             —— 'LibreTV-Settings'，为兼容老配置文件（见方案 A-17）
           #   functions/proxy/*      —— LIBRETV_PROXY_KV，现网已绑定的环境变量名
           #   .github/workflows/ci.yml —— 本文件自身（grep pattern 与注释里必然含品牌词）
-          hits=$(git grep -niE 'libretv|librespark|bestzwei' -- .             ':!libs/' ':!LICENSE' ':!README.md' ':!about.html'             ':!js/app.js' ':!functions/proxy/*' ':!.github/workflows/ci.yml' || true)
+          hits=$(git grep -niE 'libretv|librespark|bestzwei' -- .             ':!libs/' ':!LICENSE' ':!README.md' ':!about.html'             ':!functions/proxy/*' ':!.github/workflows/ci.yml' || true)
+          # 第 1.5 层：'LibreTV-Settings' 是**老配置文件的格式名**，不是品牌标识 ——
+          # 导入老配置必须认它，所以只放行这一个字面量；其余上游标识照样失败。
+          # （配置导入/导出在共享层 js/ui.js 里，格式名跟着搬过来了）
+          hits=$(echo "$hits" | grep -viE "'LibreTV-Settings'" || true)
           if [ -n "$hits" ]; then
             echo "::error::上游标识残留："
             echo "$hits"
