@@ -126,28 +126,8 @@
         <div class="kt-prog-cta" id="modalCta"></div>
     </aside>
 
-    <!-- ===================== 命令面板 ===================== -->
-    <div class="kt-cmd" id="ktCmd" hidden>
-        <div class="kt-cmd-box" role="dialog" aria-label="命令面板">
-            <div class="kt-cmd-in">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
-                </svg>
-                <input id="ktCmdInput" type="text" placeholder="搜片、切源、跳历史、开设置…" autocomplete="off" aria-label="命令面板输入框">
-                <button onclick="closeCmd()" class="kt-icon-btn" style="width:26px;height:26px" type="button" aria-label="关闭">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="kt-cmd-g" id="ktCmdList"></div>
-            <div class="kt-cmd-f">
-                <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
-                <span><kbd>↵</kbd>执行</span>
-                <span><kbd>esc</kbd>关闭</span>
-            </div>
-        </div>
-    </div>
+    <!-- 命令面板（⌘K）：全站只此一份，由 chrome.js 注入 -->
+    <div data-chrome="cmd"></div>
 
     <!-- 使用声明 / 关于我们 / 隐私政策 弹窗：由 js/chrome.js 注入（全站只此一份） -->
 

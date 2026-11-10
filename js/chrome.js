@@ -1,10 +1,11 @@
 // ============================================================
 // 全站 chrome：顶栏 + 页脚 + 两个抽屉面板
 // ------------------------------------------------------------
-// 这三个块**只在这里写一份**，各页面只留占位符：
+// 这几个块**只在这里写一份**，各页面只留占位符：
 //     <div data-chrome="header"></div>
 //     <div data-chrome="panels"></div>
 //     <div data-chrome="footer"></div>
+//     <div data-chrome="cmd"></div>
 //     <script src="js/chrome.js"></script>     ← 放 body 末尾（同步执行）
 //
 // 脚本在 body 末尾同步执行 → 首次绘制前就替换完，不会看到「先空后有」的跳动。
@@ -12,7 +13,7 @@
 // 按页面能力自动裁剪：
 //   · 没有 #historyPanel  → 不显示「历史」按钮
 //   · 没有 #settingsPanel → 不显示「设置」按钮
-//   · 没有 #searchInput   → 搜索框点击改为回首页
+// 搜索框的点击行为归 js/cmd.js：首页聚焦主搜索框，其余页面开命令面板。
 // ============================================================
 
 (function () {
@@ -206,6 +207,31 @@
         </div>
     </div>`;
 
+  // ===================== 命令面板（⌘K） =====================
+  // 全站只此一份：原先这段只写在 index.html 里，播放页/关于页就没有面板，
+  // ⌘K 自然没反应。放到 chrome 里 → 每个页面（加载 cmd.js 的）行为一致。
+  var CMD_HTML = `<div class="kt-cmd" id="ktCmd" hidden>
+        <div class="kt-cmd-box" role="dialog" aria-label="命令面板">
+            <div class="kt-cmd-in">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+                </svg>
+                <input id="ktCmdInput" type="text" placeholder="搜片、切源、跳历史、开设置…" autocomplete="off" aria-label="命令面板输入框">
+                <button onclick="closeCmd()" class="kt-icon-btn" style="width:26px;height:26px" type="button" aria-label="关闭">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="kt-cmd-g" id="ktCmdList"></div>
+            <div class="kt-cmd-f">
+                <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
+                <span><kbd>↵</kbd>执行</span>
+                <span><kbd>esc</kbd>关闭</span>
+            </div>
+        </div>
+    </div>`;
+
   // 关于页上这三个链接指本页锚点（内容就在同一页）；其它页面指 about.html，由 JS 接管成弹窗
   var onAboutPage = /about\.html$/.test(location.pathname) || location.pathname === '/about';
   function footLink(id, anchor, label) {
@@ -365,18 +391,6 @@
       var sb = document.querySelector('[data-chrome-btn="settings"]');
       if (sb) sb.remove();
     }
-    // 搜索：没有主搜索框的页面（播放页等）→ 搜索框改为回首页
-    if (!document.getElementById('searchInput')) {
-      var box = document.getElementById('openCmd');
-      if (box) {
-        box.setAttribute('title', '搜索影片');
-        box.setAttribute('aria-label', '搜索影片');
-        box.addEventListener('click', function (e) {
-          e.preventDefault();
-          window.location.href = '/';
-        });
-      }
-    }
   }
 
   function renderIdentity() {
@@ -393,6 +407,7 @@
   fill('header', HEADER_HTML);
   fill('panels', PANELS_HTML);
   fill('footer', FOOTER_HTML);
+  fill('cmd', CMD_HTML);
   renderIdentity();
   applyCapabilities();
   bindInfoModal();

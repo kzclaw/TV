@@ -174,6 +174,9 @@
 
     <div data-chrome="panels"></div>
 
+    <!-- 命令面板（⌘K）：全站只此一份，由 chrome.js 注入 -->
+    <div data-chrome="cmd"></div>
+
     <!-- ===================== 换源 / 选源面板（整屏遮罩，盖住播放器） ===================== -->
     <div id="modal" class="kt-overlay hidden" role="dialog" aria-modal="true" aria-label="选择播放源">
         <div class="kt-overlay-panel">
@@ -264,6 +267,7 @@
             });
         });
     </script>
+    <script src="js/cmd.js"></script>
     <script src="js/chrome.js"></script>
 </body>
 </html>

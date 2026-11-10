@@ -50,6 +50,19 @@ function cmdHistory() {
     }
 }
 
+// 搜索：当前页有主搜索框就就地搜（首页）；没有就带词回首页搜（播放页/关于页）
+function cmdSearch(text) {
+    const t = String(text || '').trim();
+    if (!t) return;
+    const input = document.getElementById('searchInput');
+    if (input) {
+        input.value = t;
+        if (typeof toggleClearButton === 'function') toggleClearButton();
+        if (typeof search === 'function') { search(); return; }
+    }
+    window.location.href = '/?s=' + encodeURIComponent(t);
+}
+
 // 组装候选
 function cmdBuildItems() {
     const items = [];
@@ -64,14 +77,7 @@ function cmdBuildItems() {
             icon: 'film',
             label: text,
             kb: source || '',
-            run: function () {
-                const input = document.getElementById('searchInput');
-                if (input) {
-                    input.value = text;
-                    if (typeof toggleClearButton === 'function') toggleClearButton();
-                }
-                if (typeof search === 'function') search();
-            }
+            run: function () { cmdSearch(text); }
         });
     }
 
@@ -116,12 +122,13 @@ function cmdBuildItems() {
         });
     });
 
-    // 操作
+    // 操作：fn 标了函数名的，只在本页真的有这个函数时才列
+    //（播放页没加载 app.js → 导出/导入配置并不存在，列出来就是个点了没反应的条目）
     [
-        { label: '打开设置', icon: 'gear', run: function () { if (typeof toggleSettings === 'function') toggleSettings(); } },
-        { label: '观看历史', icon: 'clock', run: function () { if (typeof toggleHistory === 'function') toggleHistory(); } },
-        { label: '导出配置', icon: 'down', run: function () { if (typeof exportConfig === 'function') exportConfig(); } },
-        { label: '导入配置', icon: 'down', run: function () { if (typeof importConfig === 'function') importConfig(); } },
+        { label: '打开设置', icon: 'gear', fn: 'toggleSettings' },
+        { label: '观看历史', icon: 'clock', fn: 'toggleHistory' },
+        { label: '导出配置', icon: 'down', fn: 'exportConfig' },
+        { label: '导入配置', icon: 'down', fn: 'importConfig' },
         { label: '关于我们', icon: 'film', run: function () {
             if (typeof window.showInfoModal === 'function') { window.showInfoModal('about'); return; }
             window.location.href = 'about.html';
@@ -131,7 +138,14 @@ function cmdBuildItems() {
             window.location.href = 'about.html';
         } }
     ].forEach(function (a) {
-        items.push({ group: '操作', icon: a.icon, label: a.label, kb: '', run: a.run });
+        if (a.fn && typeof window[a.fn] !== 'function') return;
+        items.push({
+            group: '操作',
+            icon: a.icon,
+            label: a.label,
+            kb: '',
+            run: a.run || function () { window[a.fn](); }
+        });
     });
 
     return items;
@@ -141,10 +155,23 @@ function cmdRender(query) {
     const list = document.getElementById('ktCmdList');
     if (!list) return;
 
-    const q = String(query || '').trim().toLowerCase();
-    const matched = !q ? cmdItems : cmdItems.filter(function (it) {
+    const raw = String(query || '').trim();
+    const q = raw.toLowerCase();
+    // 复制一份再改：cmdItems 是全局候选列表，不能被下面的 unshift 污染
+    const matched = (!q ? cmdItems.slice() : cmdItems.filter(function (it) {
         return it.label.toLowerCase().indexOf(q) !== -1;
-    });
+    }));
+
+    // 顶部固定一条「搜索 xxx」：面板本身就是搜索框，任何页面都能直接搜
+    if (raw) {
+        matched.unshift({
+            group: '搜索',
+            icon: 'zap',
+            label: '搜索「' + raw + '」',
+            kb: '',
+            run: function () { cmdSearch(raw); }
+        });
+    }
 
     cmdMatched = matched;
     cmdIndex = 0;
@@ -195,7 +222,7 @@ function cmdMove(delta) {
     els[cmdIndex].scrollIntoView({ block: 'nearest' });
 }
 
-// 顶栏的搜索框：点它应当能直接打字 —— 聚焦主搜索框（命令面板留给 ⌘K）
+// 顶栏的搜索框：首页点它聚焦主搜索框；没有主搜索框的页面（播放页/关于页）改开命令面板
 function focusMainSearch() {
     const input = document.getElementById('searchInput');
     if (!input) return;
@@ -206,7 +233,10 @@ function focusMainSearch() {
 
 function openCmd() {
     const panel = document.getElementById('ktCmd');
-    if (!panel) return;
+    if (!panel) {
+        console.warn('命令面板缺失：页面少了 <div data-chrome="cmd"></div>');
+        return;
+    }
     cmdItems = cmdBuildItems();
     cmdRender('');
     panel.hidden = false;
@@ -230,7 +260,13 @@ function cmdToggle() {
 
 document.addEventListener('DOMContentLoaded', function () {
     const openBtn = document.getElementById('openCmd');
-    if (openBtn) openBtn.addEventListener('click', focusMainSearch);
+    if (openBtn) {
+        // 首页有主搜索框 → 聚焦它；播放页/关于页没有 → 开命令面板（面板自带搜索）
+        openBtn.addEventListener('click', function () {
+            if (document.getElementById('searchInput')) focusMainSearch();
+            else openCmd();
+        });
+    }
 
     const closeBtn = document.querySelector('#ktCmd .kt-icon-btn');
     if (closeBtn) closeBtn.addEventListener('click', closeCmd);
