@@ -72,11 +72,14 @@ const API_SITES = {
         name: '极速资源',
         detail: 'https://jszyapi.com', 
     },
-    dbzy: {
-        api: 'https://dbzy.tv/api.php/provide/vod',
-        name: '豆瓣资源',
-        listOnly: true,
-    },
+    // dbzy（豆瓣资源）已停用：2026-11-10 实测源站域名解析失败（ERR_NAME_NOT_RESOLVED，
+    // CNAME 链 dbzy.tv → dizubagu.cdnfree.org → zivaso20.cdnfree.org 终点无 A 记录）。
+    // 留着只会白占一次请求；它原本也是 listOnly 源，不影响搜索面。
+    // dbzy: {
+    //     api: 'https://dbzy.tv/api.php/provide/vod',
+    //     name: '豆瓣资源',
+    //     listOnly: true,
+    // },
     mozhua: {
         api: 'https://sdzyapi.com/api.php/provide/vod/',
         name: '闪电资源',

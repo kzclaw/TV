@@ -58,8 +58,8 @@ const requestedApis = () => requests.map(u => decodeURIComponent(String(u).repla
 const requestedFor = (key) => requestedApis().filter(u => u.startsWith(API_SITES[key].api));
 
 (async () => {
-    // 前提：7 个源被标记为仅列表
-    assert.equal(listOnlyKeys.length, 7, '应有 7 个 listOnly 源');
+    // 前提：6 个源被标记为仅列表（dbzy 已停用，见 js/config.js）
+    assert.equal(listOnlyKeys.length, 6, '应有 6 个 listOnly 源');
 
     // 断言 1 + 2：搜索链路只对非 listOnly 源发请求
     requests.length = 0;
